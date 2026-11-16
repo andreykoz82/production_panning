@@ -1,0 +1,152 @@
+"""Отчёт о качестве данных после импорта.
+
+error — без исправления позиция не попадёт в расчёт;
+warning — расчёт пойдёт, но результат стоит проверить;
+info — для сведения.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from datetime import date
+from typing import TYPE_CHECKING
+
+from app.importers.stock import (
+    GP_WAREHOUSES,
+    WAREHOUSE_NFP,
+    WAREHOUSE_NFP_QUARANTINE,
+    WAREHOUSE_RAW,
+)
+from app.reference.lines import STAGE2_GROUPS
+
+if TYPE_CHECKING:
+    from app.importers.loader import ImportResult
+
+MAX_EXAMPLES = 10
+
+
+@dataclass
+class Issue:
+    severity: str  # error | warning | info
+    area: str  # items | specs | stock | plan | orders
+    item: str | None
+    message: str
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+def _months_ahead(today: date, n: int) -> tuple[date, date]:
+    start = today.replace(day=1)
+    year, month = divmod(start.month - 1 + n, 12)
+    return start, date(start.year + year, month + 1, 1)
+
+
+def check_quality(r: ImportResult, today: date) -> list[Issue]:
+    issues: list[Issue] = []
+    add = lambda *a: issues.append(Issue(*a))  # noqa: E731
+    items = r.items
+    scope = items[items["in_scope"]]
+
+    # --- Справочник ГП и спецификации
+    for row in items[~items["in_scope"]].itertuples():
+        add("info", "items", row.name, f"Не планируется: {row.line_group}")
+    for row in scope.itertuples():
+        if row.line_group not in STAGE2_GROUPS:
+            add("error", "items", row.name, f"Неизвестная группа линий «{row.line_group}»")
+        if row.spec is None or row.spec != row.spec:  # None или NaN
+            add("error", "specs", row.name, "Действующая спецификация не найдена")
+        elif row.spec_method == "fuzzy":
+            add(
+                "warning",
+                "specs",
+                row.name,
+                f"Спецификация найдена по похожему имени «{row.spec}» (сходство {row.spec_score:.0f}%) — "
+                "подтвердите связь",
+            )
+        elif row.spec_method == "printed_material":
+            add("info", "specs", row.name, f"Спецификация найдена по печатному материалу: «{row.spec}»")
+        elif row.spec_method == "normalized":
+            add("info", "specs", row.name, f"В спецификациях имя записано иначе: «{row.spec}»")
+        if not row.nfp or row.nfp != row.nfp:
+            add("error", "items", row.name, "НФП не указан ни в actual_items, ни в спецификации")
+        elif row.nfp_source == "spec":
+            add(
+                "warning",
+                "items",
+                row.name,
+                f"НФП не заполнен в actual_items, взят из спецификации: {row.nfp}",
+            )
+
+    multi = r.specs_effective.groupby("spec")["versions_active"].first()
+    multi = multi[multi > 1]
+    if len(multi):
+        add(
+            "info",
+            "specs",
+            None,
+            f"У {len(multi)} спецификаций несколько действующих версий — взята версия "
+            "с максимальной нормой НФП, материалы-аналоги из других версий взаимозаменяемы",
+        )
+    closed = r.specs[r.specs["status"].notna() & (r.specs["status"] != "Действует")]
+    if len(closed):
+        add(
+            "info",
+            "specs",
+            None,
+            f"Не учитываются {closed['spec'].nunique()} спецификаций со статусом "
+            f"«Закрыта» / «В разработке» (без действующей версии: "
+            f"{len(set(closed['spec']) - set(r.specs_effective['spec']))})",
+        )
+
+    # --- План продаж
+    start, end = _months_ahead(today, 12)
+    plan = r.sales_plan
+    ahead = plan[(plan["month"] >= start) & (plan["month"] < end) & plan["item"].notna()]
+    planned = set(ahead.loc[ahead["qty"] > 0, "item"])
+    for name in scope["name"]:
+        if name not in planned:
+            add("warning", "plan", name, "Нет плана продаж на ближайшие 12 месяцев")
+    unknown = sorted(set(plan.loc[plan["item"].isna(), "name"]))
+    if unknown:
+        add(
+            "info",
+            "plan",
+            None,
+            f"{len(unknown)} позиций плана продаж нет в actual_items (НФП, сырьё, снятые позиции): "
+            + "; ".join(unknown[:MAX_EXAMPLES])
+            + (" …" if len(unknown) > MAX_EXAMPLES else ""),
+        )
+
+    # --- Остатки
+    stock = r.stock
+    defect = stock[stock["is_defect"] & stock["warehouse"].isin(GP_WAREHOUSES)]
+    if len(defect):
+        add(
+            "info",
+            "stock",
+            None,
+            f"Исключено строк брака на складах ГП: {len(defect)} "
+            f"({defect['on_hand'].sum():,.0f} шт.)".replace(",", " "),
+        )
+    nfp_stock = set(stock.loc[stock["warehouse"].isin((WAREHOUSE_NFP, WAREHOUSE_NFP_QUARANTINE)), "name"])
+    raw_stock = set(stock.loc[stock["warehouse"] == WAREHOUSE_RAW, "name"])
+    for row in scope.itertuples():
+        if not row.nfp or row.nfp != row.nfp or row.nfp in nfp_stock:
+            continue
+        if row.nfp in raw_stock:
+            add("info", "stock", row.name, f"НФП «{row.nfp}» лежит на складе лексырья (покупной)")
+        else:
+            add("info", "stock", row.name, f"НФП «{row.nfp}» нет на складах — понадобится 1 ступень")
+
+    # --- Заказы
+    orders = r.orders
+    for row in orders[orders["item"].isna()].itertuples():
+        add("error", "orders", row.name, f"Заказ {row.number}: позиции нет в actual_items")
+    out = set(items.loc[~items["in_scope"], "name"])
+    for row in orders[orders["item"].isin(out)].itertuples():
+        add("warning", "orders", row.name, f"Заказ {row.number}: позиция не планируется")
+    for number in orders.loc[orders["number"].duplicated(), "number"].unique():
+        add("error", "orders", None, f"Номер заказа {number} встречается несколько раз")
+
+    return issues

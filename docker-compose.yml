@@ -1,0 +1,39 @@
+# Запуск: docker compose up -d --build   →   http://localhost:8080
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: planning
+      POSTGRES_USER: planning
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-planning}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U planning -d planning"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      PP_DATABASE_URL: postgresql+psycopg://planning:${DB_PASSWORD:-planning}@db:5432/planning
+      PP_DATA_DIR: /data
+    volumes:
+      # Папка с выгрузками из 1С — кнопка «Загрузить из папки» читает её
+      - "./Исходные данные:/data:ro"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:

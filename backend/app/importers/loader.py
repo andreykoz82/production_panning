@@ -1,0 +1,150 @@
+"""Загрузка всех выгрузок 1С из папки и сверка между ними."""
+
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+
+import pandas as pd
+
+from app.importers.common import ReportFormatError
+from app.importers.items import parse_items
+from app.importers.matching import match_items_to_specs, match_to_catalog
+from app.importers.orders import parse_orders
+from app.importers.quality import Issue, check_quality
+from app.importers.sales_plan import parse_sales_plan
+from app.importers.specs import effective_specs, is_nfp_component, parse_specs
+from app.importers.stock import GP_WAREHOUSES, parse_stock
+
+# Как узнаём файл по имени (без учёта регистра)
+FILE_PATTERNS = {
+    "items": "actual_items",
+    "stock": "остатки",
+    "specs": "ресурсные спецификации",
+    "sales_plan": "план продаж",
+    "orders_stage2": "заказов 2 ступень",
+}
+
+
+@dataclass
+class SourceFiles:
+    items: Path
+    stock: Path
+    specs: Path
+    sales_plan: list[Path]
+    orders_stage2: Path | None = None
+
+    @classmethod
+    def from_folder(cls, folder: Path | str) -> "SourceFiles":
+        files = [p for p in Path(folder).iterdir() if p.suffix.lower() in (".xlsx", ".xls")]
+        found: dict[str, list[Path]] = {k: [] for k in FILE_PATTERNS}
+        for path in sorted(files):
+            low = path.name.lower()
+            for key, pattern in FILE_PATTERNS.items():
+                if pattern in low:
+                    found[key].append(path)
+        missing = [k for k in ("items", "stock", "specs", "sales_plan") if not found[k]]
+        if missing:
+            raise ReportFormatError(f"В папке {folder} нет файлов: {', '.join(missing)}")
+        return cls(
+            items=found["items"][0],
+            stock=found["stock"][0],
+            specs=found["specs"][0],
+            sales_plan=found["sales_plan"],
+            orders_stage2=found["orders_stage2"][0] if found["orders_stage2"] else None,
+        )
+
+
+@dataclass
+class ImportResult:
+    items: pd.DataFrame
+    stock: pd.DataFrame
+    specs: pd.DataFrame  # все строки всех версий
+    specs_effective: pd.DataFrame  # одна версия на спецификацию
+    sales_plan: pd.DataFrame
+    orders: pd.DataFrame
+    issues: list[Issue] = field(default_factory=list)
+    files: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def summary(self) -> dict:
+        items = self.items
+        return {
+            "items_total": int(len(items)),
+            "items_in_scope": int(items["in_scope"].sum()),
+            "items_with_spec": int((items["in_scope"] & items["spec"].notna()).sum()),
+            "items_spec_to_confirm": int(items["spec_needs_confirmation"].sum()),
+            "stock_rows": int(len(self.stock)),
+            "specs_total": int(self.specs_effective["spec"].nunique()),
+            "specs_multi_version": int(
+                (self.specs_effective.groupby("spec")["versions_active"].first() > 1).sum()
+            ),
+            "plan_rows": int(len(self.sales_plan)),
+            "plan_from": str(self.sales_plan["month"].min()) if len(self.sales_plan) else None,
+            "plan_to": str(self.sales_plan["month"].max()) if len(self.sales_plan) else None,
+            "orders_stage2": int((self.orders["stage"] == 2).sum()),
+            "issues": {
+                sev: sum(1 for i in self.issues if i.severity == sev) for sev in ("error", "warning", "info")
+            },
+        }
+
+
+def import_sources(files: SourceFiles, today: date | None = None) -> ImportResult:
+    items = parse_items(files.items)
+    stock = parse_stock(files.stock)
+    specs = parse_specs(files.specs)
+    specs_eff = effective_specs(specs)
+    plan = parse_sales_plan(files.sales_plan)
+    orders = (
+        parse_orders(files.orders_stage2, stage=2)
+        if files.orders_stage2
+        else pd.DataFrame(columns=["number", "name", "qty", "stage"])
+    )
+
+    # ГП ↔ спецификация
+    matches = match_items_to_specs(items, specs_eff).set_index("item")
+    items["spec"] = items["name"].map(matches["spec"])
+    items["spec_method"] = items["name"].map(matches["method"])
+    items["spec_score"] = items["name"].map(matches["score"]).fillna(0.0)
+    items["spec_needs_confirmation"] = items["name"].map(matches["needs_confirmation"]).fillna(False)
+
+    # НФП: из actual_items, а если не заполнен — компонент-НФП из спецификации
+    nfp_by_spec = (
+        specs_eff[specs_eff["component"].map(is_nfp_component)]
+        .sort_values("qty_per_1000", ascending=False)
+        .drop_duplicates("spec")
+        .set_index("spec")["component"]
+    )
+    items["nfp_source"] = items["nfp"].map(lambda v: "actual_items" if v else None)
+    fill = items["nfp"].isna() & items["spec"].isin(nfp_by_spec.index)
+    items.loc[fill, "nfp"] = items.loc[fill, "spec"].map(nfp_by_spec)
+    items.loc[fill, "nfp_source"] = "spec"
+
+    # Ссылки отчётов на справочник ГП
+    catalog = items["name"]
+    plan["item"] = match_to_catalog(plan["name"], catalog)
+    orders["item"] = match_to_catalog(orders["name"], catalog)
+    stock["item"] = None
+    gp_mask = stock["warehouse"].isin(GP_WAREHOUSES)
+    stock.loc[gp_mask, "item"] = match_to_catalog(stock.loc[gp_mask, "name"], catalog)
+
+    result = ImportResult(
+        items=items,
+        stock=stock,
+        specs=specs,
+        specs_effective=specs_eff,
+        sales_plan=plan,
+        orders=orders,
+        files={
+            "items": files.items.name,
+            "stock": files.stock.name,
+            "specs": files.specs.name,
+            "sales_plan": ", ".join(p.name for p in files.sales_plan),
+            "orders_stage2": files.orders_stage2.name if files.orders_stage2 else "",
+        },
+    )
+    result.issues = check_quality(result, today=today or date.today())
+    return result
+
+
+def import_folder(folder: Path | str, today: date | None = None) -> ImportResult:
+    return import_sources(SourceFiles.from_folder(folder), today=today)
