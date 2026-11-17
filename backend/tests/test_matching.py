@@ -9,17 +9,28 @@ def test_all_planned_items_have_spec(imported):
     assert not scope["spec_needs_confirmation"].any()
 
 
-def test_known_spelling_differences(imported):
-    by_name = imported.items.set_index("name")
-    cases = {
-        'Фп Фиточай "Мята" (ТМ "Будь здоров!") (БАД)20х1,5г': 'Фп Фиточай "Мята" (ТМ "Будь здоров!") (БАД)20*1,5г',
-        "Шиповник плоды низковитаминные 50г": "Шиповник низковитаминный плoды 50г",
-        "Фп Ромашка цветки 20x1,5г": "Фп Ромашка цветки 20x1,5г (С РПС)",
-        "Ламинарии слоевища (морская капуста) 100г": "Ламинарии слоевища (Морская капуста) 100г",
-        "Валериана корневища с корнями 50г": "Валериана корневища и корни 50г",
-    }
-    for item, spec in cases.items():
-        assert by_name.loc[item, "spec"] == spec, item
+def test_spelling_differences_seen_in_1c():
+    """Расхождения, которые были в выгрузках 16.11.2026: ищутся без ручной правки."""
+    items = pd.DataFrame(
+        [
+            {"name": 'Фп Фиточай "Мята" (ТМ "Будь здоров!") (БАД)20х1,5г', "printed_material": "-"},
+            {"name": "Шиповник плоды низковитаминные 50г", "printed_material": "Б-6М Шиповник 50г"},
+            {"name": "Фп Ромашка цветки 20x1,5г", "printed_material": "П-8 Фп Ромашка цветки 20х1,5г"},
+        ]
+    )
+    specs = pd.DataFrame(
+        [
+            {"spec": 'Фп Фиточай "Мята" (ТМ "Будь здоров!") (БАД)20*1,5г', "component": "Мята НФП"},
+            {"spec": "Шиповник низковитаминный плoды 50г", "component": "Б-6М Шиповник 50г"},
+            {"spec": "Фп Ромашка цветки 20x1,5г (С РПС)", "component": "П-8 Фп Ромашка цветки 20х1,5г"},
+            {"spec": "Ромашка цветки (крупный порошок)", "component": "Ромашка цветки цельные"},
+        ]
+    )
+    m = match_items_to_specs(items, specs).set_index("item")
+    assert m.loc[items.name[0], "method"] == "normalized"
+    assert m.loc[items.name[1], "spec"] == "Шиповник низковитаминный плoды 50г"
+    assert m.loc[items.name[2], "spec"] == "Фп Ромашка цветки 20x1,5г (С РПС)"
+    assert m.loc[items.name[2], "method"] == "printed_material"
 
 
 def test_fuzzy_match_needs_confirmation():

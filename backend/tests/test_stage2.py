@@ -211,7 +211,7 @@ def test_real_data(imported):
     )
     res = calculate_stage2(data, Stage2Params(3, CALC))
     lines = res.lines
-    assert len(lines) == 122
+    assert len(lines) == imported.items["in_scope"].sum()
     assert (lines["need"] >= 0).all() and (lines["feasible"] <= lines["need"]).all()
-    assert list(lines["priority"]) == list(range(1, 123))
+    assert list(lines["priority"]) == list(range(1, len(lines) + 1))
     assert res.summary["month_factors"]["2026-11-01"] == 0.5

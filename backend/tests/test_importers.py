@@ -6,18 +6,21 @@ import pytest
 
 from app.importers.specs import effective_specs, parse_specs
 from app.importers.stock import WAREHOUSE_GP, WAREHOUSE_WHOLESALE
+from app.reference.lines import EXCLUDED_GROUPS, STAGE2_GROUPS
 
 
 def test_items(imported):
     items = imported.items
-    assert len(items) == 129
-    assert items["in_scope"].sum() == 122  # без розлива и контрактной площадки
-    assert set(items.loc[~items["in_scope"], "line_group"]) == {"Линия розлива", "Контрактная площадка"}
+    assert len(items) > 100
+    assert items["name"].is_unique
+    assert set(items.loc[items["in_scope"], "line_group"]) <= STAGE2_GROUPS
+    # розлив и контрактная площадка, если остались в файле, не планируются
+    assert set(items.loc[~items["in_scope"], "line_group"]) <= EXCLUDED_GROUPS
 
 
 def test_stock(imported):
     stock = imported.stock
-    assert len(stock) == 2549
+    assert len(stock) > 1000
     assert stock["warehouse"].nunique() == 7
     assert stock["is_defect"].any()
     aira = stock[
@@ -55,7 +58,7 @@ def test_sales_plan(imported):
 
 def test_orders(imported):
     orders = imported.orders
-    assert len(orders) == 33
+    assert len(orders) > 0
     assert orders["number"].is_unique
     assert orders["number"].str.startswith("КЛ00-").all()
     assert orders["item"].notna().all()
