@@ -59,3 +59,17 @@ def test_upload(client, data_dir):
 
 def test_unknown_snapshot(client):
     assert client.get("/api/imports/999").status_code == 404
+
+
+def test_stage2_run_and_export(client, data_dir):
+    client.post("/api/imports/from-folder")
+    run = client.post("/api/planning/stage2", json={"horizon_months": 3, "calc_date": "2026-11-17"}).json()
+    assert run["summary"]["items"] == 122
+    assert len(run["lines"]) == 122
+    assert client.get("/api/planning/runs").json()[0]["id"] == run["id"]
+    xlsx = client.get(f"/api/planning/runs/{run['id']}/export")
+    assert xlsx.status_code == 200 and xlsx.content[:2] == b"PK"
+
+
+def test_stage2_without_snapshot(client):
+    assert client.post("/api/planning/stage2", json={"horizon_months": 3}).status_code == 404

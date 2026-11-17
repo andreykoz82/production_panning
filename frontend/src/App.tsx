@@ -3,14 +3,16 @@ import { useState } from 'react'
 
 import ImportPage from './pages/ImportPage'
 import LinesPage from './pages/LinesPage'
+import Stage2Page from './pages/Stage2Page'
 
 const PAGES = [
   { key: 'import', label: 'Импорт данных 1С', element: <ImportPage /> },
+  { key: 'stage2', label: 'Потребность 2 ступени', element: <Stage2Page /> },
   { key: 'lines', label: 'Линии и мощности', element: <LinesPage /> },
 ] as const
 
-// Следующие этапы: потребность 2 ступени, календари линий, Гант, 1 ступень
-const PLANNED = ['Потребность 2 ступени', 'Календари линий', 'Гант 2 ступени', '1 ступень']
+// Следующие этапы: календари линий, Гант, 1 ступень
+const PLANNED = ['Календари линий', 'Гант 2 ступени', '1 ступень']
 
 export default function App() {
   const [page, setPage] = useState<string>('import')

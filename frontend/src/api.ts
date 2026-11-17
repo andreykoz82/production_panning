@@ -76,3 +76,89 @@ export const api = {
   items: (id: number) => request<Item[]>(`/api/imports/${id}/items`),
   lines: () => request<Line[]>('/api/reference/lines'),
 }
+
+export type Stage2Status = 'Не требуется' | 'Можно фасовать' | 'Частично' | 'Нельзя' | 'Нет данных'
+
+export interface Stage2Line {
+  priority: number
+  item: string
+  abc: string
+  line_group: string | null
+  nfp: string | null
+  plan_horizon: number
+  gp_stock: number
+  gp_on_certification: number
+  open_orders: number
+  need: number
+  min_batch: number
+  stockout_month: string | null
+  feasible: number
+  limit: string | null
+  status: Stage2Status
+  nfp_characteristic: string | null
+  nfp_need_kg: number
+  nfp_available_kg: number
+  nfp_quarantine_kg: number
+  nfp_unreleased_kg: number
+  nfp_shortage_kg: number
+}
+
+export interface MaterialLine {
+  material: string
+  need: number
+  available: number
+  shortage: number
+  items: number
+  item_names: string
+}
+
+export interface NfpLine {
+  nfp: string
+  characteristic: string | null
+  purpose: string | null
+  need_kg: number
+  available_kg: number
+  quarantine_kg: number
+  quarantine_ready: string | null
+  unreleased_kg: number
+  shortage_kg: number
+  items: string
+}
+
+export interface PlanRun {
+  id: number
+  snapshot_id: number
+  created_at: string
+  stage: number
+  params: { horizon_months: number; calc_date: string }
+  summary: {
+    items: number
+    items_needed: number
+    items_full: number
+    items_partial: number
+    items_blocked: number
+    need_units: number
+    feasible_units: number
+    materials_short: number
+    nfp_shortage_kg: number
+    month_factors: Record<string, number>
+  }
+}
+
+export interface PlanRunDetail extends PlanRun {
+  lines: Stage2Line[]
+  materials: MaterialLine[]
+  nfp: NfpLine[]
+}
+
+export const planningApi = {
+  runs: () => request<PlanRun[]>('/api/planning/runs'),
+  run: (id: number) => request<PlanRunDetail>(`/api/planning/runs/${id}`),
+  calculate: (horizon_months: number, calc_date: string) =>
+    request<PlanRunDetail>('/api/planning/stage2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ horizon_months, calc_date }),
+    }),
+  exportUrl: (id: number) => `/api/planning/runs/${id}/export`,
+}
