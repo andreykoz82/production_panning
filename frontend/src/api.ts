@@ -162,3 +162,75 @@ export const planningApi = {
     }),
   exportUrl: (id: number) => `/api/planning/runs/${id}/export`,
 }
+
+// ---------- календари и Гант
+
+export interface CalendarDay {
+  day: string
+  shifts: number
+  template: number
+  manual: boolean
+  reason: string | null
+}
+
+export interface CalendarLine {
+  line_code: string
+  stage: number
+  group: string
+  mode: '5/2' | '24/7'
+  template_shifts: number
+  days: CalendarDay[]
+  hours: number
+}
+
+export interface CalendarMonth {
+  month: string
+  days: { day: string; workday: boolean }[]
+  lines: CalendarLine[]
+}
+
+export interface ScheduleTask {
+  id: number
+  number: string
+  item: string
+  qty: number
+  line_group: string | null
+  line_code: string | null
+  start: string | null
+  end: string | null
+  hours: number
+  changeover: boolean
+  locked: boolean
+  available_from: string | null
+  warnings: string[]
+}
+
+export interface Schedule {
+  lines: { code: string; group: string; per_hour: number }[]
+  tasks: ScheduleTask[]
+  off: { line_code: string; start: string; end: string }[]
+  load: { line_code: string; week_start: string; available_hours: number; busy_hours: number; load: number | null }[]
+}
+
+const json = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
+export const scheduleApi = {
+  month: (month: string) => request<CalendarMonth>(`/api/calendars?month=${month}`),
+  setTemplate: (line_code: string, mode: string, shifts: number) =>
+    request('/api/calendars/template', json('PUT', { line_code, mode, shifts })),
+  setDays: (changes: { line_code: string; day: string; shifts: number | null; reason?: string }[]) =>
+    request('/api/calendars/days', json('PUT', { changes })),
+  resetMonth: (month: string, line_code?: string) =>
+    request(`/api/calendars/month?month=${month}${line_code ? `&line_code=${encodeURIComponent(line_code)}` : ''}`, {
+      method: 'DELETE',
+    }),
+  schedule: (from: string, to: string) => request<Schedule>(`/api/schedule?from=${from}&to=${to}`),
+  sync: () => request<{ added: number; updated: number; removed: number; total: number }>('/api/schedule/sync', { method: 'POST' }),
+  replan: () => request('/api/schedule/replan', { method: 'POST' }),
+  patchTask: (id: number, patch: { line_code?: string; start?: string; locked?: boolean }) =>
+    request(`/api/schedule/tasks/${id}`, json('PATCH', patch)),
+}

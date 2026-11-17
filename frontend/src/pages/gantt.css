@@ -1,0 +1,33 @@
+.gantt .vis-item.task {
+  background: #e6fcf5;
+  border-color: #20c997;
+  color: #087f5b;
+  font-size: 12px;
+}
+.gantt .vis-item.task.warn {
+  background: #fff4e6;
+  border-color: #fd7e14;
+  color: #a33a00;
+}
+.gantt .vis-item.task.locked {
+  border-width: 2px;
+  border-style: solid;
+  box-shadow: inset 3px 0 0 #495057;
+}
+.gantt .vis-item.task.vis-selected {
+  border-color: #1c7ed6;
+  background: #d0ebff;
+}
+.gantt .vis-item.vis-background.off {
+  background: repeating-linear-gradient(45deg, #f1f3f5, #f1f3f5 4px, #e9ecef 4px, #e9ecef 8px);
+}
+.gantt .vis-label .vis-inner {
+  font-size: 13px;
+}
+.gantt .group-name {
+  font-weight: 600;
+}
+.gantt .group-sub {
+  font-size: 11px;
+  color: #868e96;
+}
