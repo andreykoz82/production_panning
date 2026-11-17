@@ -99,3 +99,48 @@ def test_in_progress_task_first_on_line_has_no_changeover():
     schedule([running, nxt], cals, START)
     assert not running.changeover and running.hours == 1.0
     assert nxt.changeover and nxt.start == running.end
+
+
+def test_nfp_reserved_in_quarantine_covers_its_stage(monkeypatch):
+    """Диспетчер зарезервировал НФП с карантина под этап — предупреждения быть не должно."""
+    import pandas as pd
+
+    from app.planning.stage2 import PlanningData
+    from app.services import schedule as svc
+
+    items = pd.DataFrame(
+        [("Сбор 50г", "Сбор 50г", "Сбор НФП", "ф/п"), ("Мята 50г", "Мята 50г", "Мята НФП", "ф/п")],
+        columns=["name", "spec", "nfp", "purpose"],
+    )
+    specs = pd.DataFrame(
+        [("Сбор 50г", "Сбор НФП", "КП", 50.0), ("Мята 50г", "Мята НФП", "КП", 50.0)],
+        columns=["spec", "component", "characteristic", "qty_per_1000"],
+    )
+    stock = pd.DataFrame(
+        [
+            # весь карантинный НФП зарезервирован под этап «К выполнению»
+            ("Склад НФП (карантинное хранение)", "Сбор НФП", "КП", "ф/п", True, 0.0, 100.0, "nfp_quarantine"),
+            # свободный НФП мяты — 30 кг, начатый этап его не трогает
+            ("Склад нерасфасованных продуктов", "Мята НФП", "КП", "ф/п", True, 30.0, 0.0, "nfp"),
+        ],
+        columns=[
+            "warehouse",
+            "name",
+            "characteristic",
+            "purpose",
+            "packing_allowed",
+            "available",
+            "reserved",
+            "role",
+        ],
+    )
+    data = PlanningData(items=items, stock=stock, specs=specs, plan=pd.DataFrame(), orders=pd.DataFrame())
+    monkeypatch.setattr(svc, "load_planning_data", lambda *a, **k: data)
+
+    sbor = Task(key="1", item="Сбор 50г", qty=2000, group="", start=START)  # 100 кг
+    mint_started = Task(key="2", item="Мята 50г", qty=2000, group="", start=START)  # 100 кг, уже начат
+    mint = Task(key="3", item="Мята 50г", qty=600, group="", start=START)  # 30 кг
+    mint_big = Task(key="4", item="Мята 50г", qty=1000, group="", start=START.replace(hour=12))  # 50 кг
+    svc._nfp_warnings(None, 1, [sbor, mint_started, mint, mint_big], START.date(), started={"2"})
+    assert sbor.warnings == [] and mint_started.warnings == [] and mint.warnings == []
+    assert mint_big.warnings and "хватит на 0 шт" in mint_big.warnings[0]
