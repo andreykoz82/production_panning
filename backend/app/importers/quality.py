@@ -142,13 +142,24 @@ def check_quality(r: ImportResult, today: date) -> list[Issue]:
             add("info", "stock", row.name, f"НФП «{row.nfp}» нет на складах — понадобится 1 ступень")
 
     # --- Заказы
-    orders = r.orders
+    all_orders = r.orders
+    orders = all_orders[all_orders["stage"] == 2]
     for row in orders[orders["item"].isna()].itertuples():
         add("error", "orders", row.name, f"Заказ {row.number}: позиции нет в actual_items")
     out = set(items.loc[~items["in_scope"], "name"])
     for row in orders[orders["item"].isin(out)].itertuples():
         add("warning", "orders", row.name, f"Заказ {row.number}: позиция не планируется")
-    for number in orders.loc[orders["number"].duplicated(), "number"].unique():
+    for number in all_orders.loc[all_orders["number"].duplicated(), "number"].unique():
         add("error", "orders", None, f"Номер заказа {number} встречается несколько раз")
+    if "line_1c" in all_orders.columns:
+        unknown = all_orders[all_orders["line_1c"].notna() & all_orders["line_code"].isna()]
+        for line in sorted(unknown["line_1c"].unique()):
+            add("warning", "orders", None, f"Линия 1С «{line}» не сопоставлена с линиями приложения")
+        done = orders[(orders["qty_plan"] > 0) & (orders["qty"] <= 0)]
+        for row in done.itertuples():
+            add("info", "orders", row.name, f"Заказ {row.number}: выполнен полностью, на Ганте его нет")
+        stage1 = all_orders[all_orders["stage"] == 1]
+        for row in stage1[stage1["nfp"].isna()].itertuples():
+            add("info", "orders", row.name, f"Заказ 1 ступени {row.number}: не найден НФП в справочнике")
 
     return issues

@@ -177,7 +177,11 @@ export default function ImportPage() {
               value={`${snap.summary.plan_from?.slice(0, 7)} … ${snap.summary.plan_to?.slice(0, 7)}`}
               hint={`${snap.summary.plan_rows} строк`}
             />
-            <Stat label="Открытых заказов 2 ступени" value={snap.summary.orders_stage2} />
+            <Stat
+              label="Открытых этапов 2 ступени"
+              value={snap.summary.orders_stage2}
+              hint={snap.summary.orders_stage1 != null ? `1 ступени: ${snap.summary.orders_stage1}` : undefined}
+            />
           </SimpleGrid>
 
           <TextInput

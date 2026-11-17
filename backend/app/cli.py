@@ -25,7 +25,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"ГП: {s['items_total']} (в планировании {s['items_in_scope']}, со спецификацией "
         f"{s['items_with_spec']}); строк остатков: {s['stock_rows']}; спецификаций: {s['specs_total']}; "
-        f"план продаж: {s['plan_from']} … {s['plan_to']}; заказов 2 ступени: {s['orders_stage2']}"
+        f"план продаж: {s['plan_from']} … {s['plan_to']}; "
+        f"заказов 1/2 ступени: {s.get('orders_stage1', 0)}/{s['orders_stage2']}"
     )
     print(
         f"Проблемы: ошибок {s['issues']['error']}, предупреждений {s['issues']['warning']}, "

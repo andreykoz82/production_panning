@@ -13,6 +13,7 @@ from app.planning.calendar import add_workdays, is_workday
 from app.reference import warehouses as wh
 from app.reference.lines import (
     GP_CERTIFICATION_DAYS,
+    LINE_BY_CODE,
     LINES,
     NFP_QUARANTINE_WORKDAYS,
     STAGE2_GROUPS,
@@ -129,8 +130,16 @@ def latest_stage2_run(session: Session, snapshot_id: int | None = None) -> model
     return session.scalar(q.order_by(models.PlanRun.id.desc()).limit(1))
 
 
+STARTED = "Начат"
+
+
 def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
-    """Открытые заказы 2 ступени из снимка → задачи Ганта (по номеру заказа 1С)."""
+    """Открытые этапы 2 ступени из снимка → задачи Ганта (по номеру этапа 1С).
+
+    На Гант попадает остаток «запланировано − выполнено». Линия из 1С — начальная;
+    у начатых этапов она закрепляется (если планировщик не закрепил свою), остальные
+    расставляются автоматически внутри группы линий.
+    """
     snapshot_id = snapshot_id or latest_snapshot_id(session)
     if not snapshot_id:
         raise LookupError("Нет снимка данных — сначала загрузите выгрузки 1С")
@@ -141,7 +150,9 @@ def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
     )
     orders = session.scalars(
         select(models.ProductionOrder).where(
-            models.ProductionOrder.snapshot_id == snapshot_id, models.ProductionOrder.stage == 2
+            models.ProductionOrder.snapshot_id == snapshot_id,
+            models.ProductionOrder.stage == 2,
+            models.ProductionOrder.qty > 0,
         )
     ).all()
     existing = {t.number: t for t in session.scalars(select(models.ScheduleTask))}
@@ -149,18 +160,25 @@ def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
     seen = set()
     for o in orders:
         item = o.item or o.name
+        group = groups.get(item)
+        line_1c = o.line_code if o.line_code and LINE_BY_CODE[o.line_code].group == group else None
+        started = o.status == STARTED
         seen.add(o.number)
         task = existing.get(o.number)
         if task is None:
-            session.add(
-                models.ScheduleTask(
-                    number=o.number, item=item, qty=o.qty, line_group=groups.get(item), warnings=[]
-                )
-            )
+            task = models.ScheduleTask(number=o.number, item=item, warnings=[], line_code=line_1c)
+            task.line_locked = bool(started and line_1c)
+            session.add(task)
             added += 1
-        elif task.qty != o.qty or task.item != item:
-            task.qty, task.item, task.line_group = o.qty, item, groups.get(item)
-            updated += 1
+        else:
+            changed = (task.qty, task.item, task.status, task.qty_done) != (o.qty, item, o.status, o.qty_done)
+            updated += changed
+            # этап начат в 1С — закрепляем его линию, если планировщик ничего не закреплял вручную
+            if started and task.status != STARTED and line_1c and not (task.locked or task.line_locked):
+                task.line_code, task.line_locked = line_1c, True
+        task.qty, task.item, task.line_group = o.qty, item, group
+        task.status, task.line_1c, task.started_at = o.status, o.line_1c, o.started_at
+        task.qty_plan, task.qty_done = o.qty_plan, o.qty_done
     removed = [n for n in existing if n not in seen]
     if removed:
         session.execute(delete(models.ScheduleTask).where(models.ScheduleTask.number.in_(removed)))
@@ -172,8 +190,14 @@ def _month_label(d: date) -> str:
     return f"{MONTHS[d.month - 1]} {d.year}"
 
 
-def _nfp_warnings(session: Session, snapshot_id: int, tasks: list[Task], today: date) -> None:
-    """Хватит ли НФП к старту заказа. Резерв на складе НФП считаем заготовленным под открытые заказы."""
+def _nfp_warnings(
+    session: Session, snapshot_id: int, tasks: list[Task], today: date, started: set[str] = frozenset()
+) -> None:
+    """Хватит ли НФП к старту заказа. Резерв на складе НФП считаем заготовленным под открытые заказы.
+
+    Начатые в 1С этапы забирают свой НФП из остатка, но без предупреждения: НФП под них
+    уже мог быть передан в цех и на складе его не видно.
+    """
     data = load_planning_data(session, snapshot_id, with_reserve=True)
     items = data.items.set_index("name")
     specs = data.specs
@@ -210,7 +234,7 @@ def _nfp_warnings(session: Session, snapshot_id: int, tasks: list[Task], today: 
                 q_pool[key] = q_pool.get(key, 0.0) - extra
                 have += extra
         # допуск 1 %: резерв в 1С округлён, нормы в спецификации — тоже
-        if need - have > max(0.01 * need, 1.0):
+        if t.key not in started and need - have > max(0.01 * need, 1.0):
             can = math.floor(have / norm) if norm else 0
             t.warnings.append(
                 f"НФП к старту хватит на {_n(can)} шт из {_n(t.qty)}: нужно {_n(need)} кг, есть {_n(have)}"
@@ -229,6 +253,12 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
     run = latest_stage2_run(session, snapshot_id) or latest_stage2_run(session)
     run_lines = {r["item"]: r for r in (run.lines if run else [])}
 
+    # начатые в 1С этапы идут первыми, в порядке фактического начала
+    started = sorted(
+        (db for db in db_tasks if db.status == STARTED), key=lambda db: (db.started_at or now, db.number)
+    )
+    started_rank = {db.number: i - len(started) for i, db in enumerate(started)}
+
     tasks = []
     for db in db_tasks:
         r = run_lines.get(db.item, {})
@@ -238,7 +268,7 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
                 item=db.item,
                 qty=db.qty,
                 group=db.line_group or "",
-                priority=r.get("priority", math.inf),
+                priority=started_rank.get(db.number, r.get("priority", math.inf)),
                 line_code=db.line_code,
                 start=db.start,
                 locked=db.locked,
@@ -258,7 +288,7 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
                     f"ГП будет доступна к продаже {ready:%d.%m.%Y}, а запас кончается в {_month_label(month)}"
                 )
     if snapshot_id:
-        _nfp_warnings(session, snapshot_id, tasks, now.date())
+        _nfp_warnings(session, snapshot_id, tasks, now.date(), set(started_rank))
 
     by_key = {t.key: t for t in tasks}
     for db in db_tasks:

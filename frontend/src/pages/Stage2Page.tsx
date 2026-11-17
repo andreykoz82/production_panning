@@ -169,7 +169,15 @@ export default function Stage2Page() {
               hint={`можно выпустить сейчас ${num.format(s.feasible_units)}`}
             />
             <Stat label="Материалов в дефиците" value={s.materials_short} />
-            <Stat label="Выпустить НФП на 1 ступени" value={`${kg.format(s.nfp_shortage_kg)} кг`} hint="с учётом карантина" />
+            <Stat
+              label="Выпустить НФП на 1 ступени"
+              value={`${kg.format(s.nfp_shortage_kg)} кг`}
+              hint={
+                s.nfp_uncovered_kg != null
+                  ? `в заказах 1 ступени ${kg.format(s.nfp_stage1_orders_kg ?? 0)}, не покрыто ${kg.format(s.nfp_uncovered_kg)}`
+                  : 'с учётом карантина'
+              }
+            />
           </SimpleGrid>
           {s.warehouses && (
             <Text size="xs" c="dimmed">
@@ -295,6 +303,7 @@ export default function Stage2Page() {
             <Tabs.Panel value="nfp" pt="md">
               <Text size="sm" c="dimmed" mb="sm">
                 Что выпустить на 1 ступени: потребность в НФП минус доступный НФП и НФП на карантине (5 рабочих дней).
+                Открытые заказы 1 ступени той же фракции уменьшают «Не покрыто».
               </Text>
               <Table striped fz="sm">
                 <Table.Thead>
@@ -305,6 +314,8 @@ export default function Stage2Page() {
                     <Table.Th ta="right">Доступно</Table.Th>
                     <Table.Th ta="right">Карантин</Table.Th>
                     <Table.Th ta="right">Выпустить, кг</Table.Th>
+                    <Table.Th ta="right">В заказах 1 ст.</Table.Th>
+                    <Table.Th ta="right">Не покрыто</Table.Th>
                     <Table.Th>Для каких ГП</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -328,8 +339,10 @@ export default function Stage2Page() {
                           </Text>
                         )}
                       </Table.Td>
-                      <Table.Td ta="right" fw={600}>
-                        {kg.format(n.shortage_kg)}
+                      <Table.Td ta="right">{kg.format(n.shortage_kg)}</Table.Td>
+                      <Table.Td ta="right">{kg.format(n.stage1_orders_kg ?? 0)}</Table.Td>
+                      <Table.Td ta="right" fw={600} c={(n.uncovered_kg ?? n.shortage_kg) > 0 ? 'red' : undefined}>
+                        {kg.format(n.uncovered_kg ?? n.shortage_kg)}
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs">{n.items}</Text>

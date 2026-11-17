@@ -83,8 +83,10 @@ def save_snapshot(session: Session, result: ImportResult, source: str) -> models
     session.execute(insert(models.SalesPlanRow), _records(result.sales_plan, plan_cols, sid))
 
     if len(result.orders):
-        order_cols = ["number", "stage", "name", "item", "qty"]
-        session.execute(insert(models.ProductionOrder), _records(result.orders, order_cols, sid))
+        order_cols = ["number", "stage", "name", "item", "qty", "qty_plan", "qty_done", "status", "line_1c"]
+        order_cols += ["line_code", "started_at", "production_date", "doc_date", "nfp", "nfp_characteristic"]
+        orders = result.orders.astype(object).where(result.orders.notna(), None)
+        session.execute(insert(models.ProductionOrder), _records(orders, order_cols, sid))
 
     session.execute(
         insert(models.ImportIssue),

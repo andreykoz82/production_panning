@@ -215,3 +215,26 @@ def test_real_data(imported):
     assert (lines["need"] >= 0).all() and (lines["feasible"] <= lines["need"]).all()
     assert list(lines["priority"]) == list(range(1, len(lines) + 1))
     assert res.summary["month_factors"]["2026-11-01"] == 0.5
+
+
+def test_stage1_orders_cover_nfp_shortage_across_purposes():
+    from app.planning.stage2 import _apply_stage1_orders
+
+    records = [
+        {"nfp": "Мята НФП", "characteristic": "Крупный порошок", "purpose": "А", "shortage_kg": 100.0},
+        {"nfp": "Мята НФП", "characteristic": "Крупный порошок", "purpose": "Б", "shortage_kg": 300.0},
+        {"nfp": "Мята НФП", "characteristic": "Цельное", "purpose": "А", "shortage_kg": 50.0},
+    ]
+    orders = pd.DataFrame(
+        [
+            ("КЛ00-1.1.1", None, 250.0, 1, "Мята НФП", "Крупный порошок"),
+            ("КЛ00-2.1.1", None, 100.0, 1, "Мята НФП", "Крупный порошок"),
+            ("КЛ00-3.1.1", "Мята 50г", 999.0, 2, None, None),
+        ],
+        columns=["number", "item", "qty", "stage", "nfp", "nfp_characteristic"],
+    )
+    _apply_stage1_orders(records, orders)
+    a, b, whole = records
+    assert (b["stage1_orders_kg"], b["uncovered_kg"]) == (300.0, 0.0)  # сначала больший дефицит
+    assert (a["stage1_orders_kg"], a["uncovered_kg"]) == (50.0, 50.0)  # остаток 350 − 300
+    assert (whole["stage1_orders_kg"], whole["uncovered_kg"]) == (0.0, 50.0)  # другая фракция

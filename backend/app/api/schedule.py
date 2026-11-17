@@ -53,6 +53,11 @@ class TaskOut(BaseModel):
     line_locked: bool
     available_from: date | None
     warnings: list[str]
+    status: str | None = None
+    line_1c: str | None = None
+    started_at: datetime | None = None
+    qty_plan: float | None = None
+    qty_done: float | None = None
 
 
 class TaskPatch(BaseModel):

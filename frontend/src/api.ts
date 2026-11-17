@@ -16,6 +16,7 @@ export interface Snapshot {
     plan_rows: number
     plan_from: string | null
     plan_to: string | null
+    orders_stage1?: number
     orders_stage2: number
     issues: Record<Severity, number>
   }
@@ -122,6 +123,8 @@ export interface NfpLine {
   quarantine_ready: string | null
   unreleased_kg: number
   shortage_kg: number
+  stage1_orders_kg?: number
+  uncovered_kg?: number
   items: string
 }
 
@@ -141,6 +144,8 @@ export interface PlanRun {
     feasible_units: number
     materials_short: number
     nfp_shortage_kg: number
+    nfp_stage1_orders_kg?: number
+    nfp_uncovered_kg?: number
     month_factors: Record<string, number>
     warehouses?: Record<string, string[]>
   }
@@ -205,6 +210,11 @@ export interface ScheduleTask {
   line_locked: boolean
   available_from: string | null
   warnings: string[]
+  status: string | null
+  line_1c: string | null
+  started_at: string | null
+  qty_plan: number | null
+  qty_done: number | null
 }
 
 export interface Schedule {

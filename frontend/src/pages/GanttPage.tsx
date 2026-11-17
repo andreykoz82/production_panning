@@ -24,6 +24,8 @@ function tooltip(t: ScheduleTask) {
   const lines = [
     `<b>${t.number}</b> · ${t.item}`,
     `${num.format(t.qty)} шт · ${t.hours} ч${t.changeover ? ' (с переналадкой 1 ч)' : ''}`,
+    ...(t.qty_done ? [`Выпущено ${num.format(t.qty_done)} из ${num.format(t.qty_plan ?? 0)}`] : []),
+    `1С: ${t.status ?? '—'}${t.line_1c ? ` · ${t.line_1c}` : ''}${t.started_at ? ` · начат ${fmt(t.started_at)}` : ''}`,
     `${fmt(t.start)} — ${fmt(t.end)}`,
     `ГП к продаже: ${fmtDate(t.available_from)}`,
     t.locked ? 'Время и линия зафиксированы вручную' : t.line_locked ? 'Линия закреплена вручную, время — автоматически' : 'Расставлен автоматически',
@@ -116,7 +118,7 @@ export default function GanttPage() {
           group: t.line_code!,
           start: new Date(t.start!),
           end: new Date(t.end!),
-          content: `${t.locked ? '📌 ' : t.line_locked ? '📍 ' : ''}${t.item} · ${num.format(t.qty)}`,
+          content: `${t.status === 'Начат' ? '▶ ' : ''}${t.locked ? '📌 ' : t.line_locked ? '📍 ' : ''}${t.item} · ${num.format(t.qty)}`,
           title: tooltip(t),
           className: ['task', t.warnings.length ? 'warn' : '', t.locked ? 'locked' : ''].join(' '),
         })),
@@ -161,6 +163,7 @@ export default function GanttPage() {
           Открытые заказы из 1С расставляются по линиям своей группы с учётом календаря, переналадки 1 ч и приоритета из
           последнего расчёта потребности. Перетащите заказ — он зафиксируется (📌), остальные перестроятся вокруг.
           Линию можно выбрать в таблице заказов (📍): линия закрепится, а время подберётся автоматически.
+          Начатые в 1С этапы (▶) стоят на линии из 1С и идут первыми; на Ганте — остаток «запланировано − выпущено».
         </Text>
       </div>
       <Group>
@@ -235,7 +238,9 @@ export default function GanttPage() {
               <Table.Tr>
                 <Table.Th>Заказ</Table.Th>
                 <Table.Th>ГП</Table.Th>
-                <Table.Th ta="right">Кол-во</Table.Th>
+                <Table.Th>Статус 1С</Table.Th>
+                <Table.Th ta="right">Осталось</Table.Th>
+                <Table.Th>Линия в 1С</Table.Th>
                 <Table.Th>Линия</Table.Th>
                 <Table.Th>Начало</Table.Th>
                 <Table.Th>Окончание</Table.Th>
@@ -249,7 +254,33 @@ export default function GanttPage() {
                 <Table.Tr key={t.id}>
                   <Table.Td style={{ whiteSpace: 'nowrap' }}>{t.number}</Table.Td>
                   <Table.Td>{t.item}</Table.Td>
-                  <Table.Td ta="right">{num.format(t.qty)}</Table.Td>
+                  <Table.Td>
+                    {t.status === 'Начат' ? (
+                      <Badge size="sm" variant="light" color="green">
+                        Начат
+                      </Badge>
+                    ) : (
+                      <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                        {t.status ?? '—'}
+                      </Text>
+                    )}
+                    {t.started_at && (
+                      <Text size="xs" c="dimmed">
+                        с {fmt(t.started_at)}
+                      </Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    {num.format(t.qty)}
+                    {!!t.qty_done && (
+                      <Text size="xs" c="dimmed">
+                        выпущено {num.format(t.qty_done)} из {num.format(t.qty_plan ?? 0)}
+                      </Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs">{t.line_1c ?? '—'}</Text>
+                  </Table.Td>
                   <Table.Td>
                     <Select
                       size="xs"
