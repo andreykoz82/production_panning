@@ -110,3 +110,19 @@ class ImportIssue(_SnapshotRow, Base):
     area: Mapped[str] = mapped_column(String(20))
     item: Mapped[str | None] = mapped_column(String(300))
     message: Mapped[str] = mapped_column(Text)
+
+
+class PlanRun(Base):
+    """Расчёт потребности. Результат хранится целиком в JSON: строки по ГП, материалы, дефицит НФП."""
+
+    __tablename__ = "plan_run"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("import_snapshot.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    stage: Mapped[int] = mapped_column(Integer)
+    params: Mapped[dict] = mapped_column(JSON)
+    summary: Mapped[dict] = mapped_column(JSON)
+    lines: Mapped[list] = mapped_column(JSON)
+    materials: Mapped[list] = mapped_column(JSON)
+    nfp: Mapped[list] = mapped_column(JSON)
