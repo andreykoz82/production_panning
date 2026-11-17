@@ -99,8 +99,18 @@ class ProductionOrder(_SnapshotRow, Base):
     number: Mapped[str] = mapped_column(String(50))
     stage: Mapped[int] = mapped_column(Integer)
     name: Mapped[str] = mapped_column(String(300))
-    item: Mapped[str | None] = mapped_column(String(300))
-    qty: Mapped[float] = mapped_column(Float)
+    item: Mapped[str | None] = mapped_column(String(300))  # ГП (2 ступень)
+    qty: Mapped[float] = mapped_column(Float)  # открытый остаток
+    qty_plan: Mapped[float | None] = mapped_column(Float)
+    qty_done: Mapped[float | None] = mapped_column(Float)  # факт выпуска (только 2 ступень)
+    status: Mapped[str | None] = mapped_column(String(50))
+    line_1c: Mapped[str | None] = mapped_column(String(100))
+    line_code: Mapped[str | None] = mapped_column(String(30))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    production_date: Mapped[date | None] = mapped_column(Date)
+    doc_date: Mapped[datetime | None] = mapped_column(DateTime)
+    nfp: Mapped[str | None] = mapped_column(String(300))  # НФП (1 ступень)
+    nfp_characteristic: Mapped[str | None] = mapped_column(String(100))
 
 
 class ImportIssue(_SnapshotRow, Base):
@@ -167,6 +177,11 @@ class ScheduleTask(Base):
     changeover: Mapped[bool] = mapped_column(Boolean, default=False)
     locked: Mapped[bool] = mapped_column(Boolean, default=False)  # время и линия зафиксированы
     line_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # только линия
+    status: Mapped[str | None] = mapped_column(String(50))  # статус этапа в 1С
+    line_1c: Mapped[str | None] = mapped_column(String(100))  # линия, назначенная в 1С
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)  # фактическое начало этапа в 1С
+    qty_plan: Mapped[float | None] = mapped_column(Float)
+    qty_done: Mapped[float | None] = mapped_column(Float)
     available_from: Mapped[date | None] = mapped_column(Date)
     warnings: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

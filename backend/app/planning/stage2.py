@@ -46,7 +46,7 @@ class PlanningData:
     )  # warehouse, name, item, characteristic, purpose, packing_allowed, available, is_defect
     specs: pd.DataFrame  # действующие версии: spec, component, characteristic, qty_per_1000
     plan: pd.DataFrame  # item, month, qty
-    orders: pd.DataFrame  # number, item, qty, stage
+    orders: pd.DataFrame  # number, item, qty, stage [, nfp, nfp_characteristic — для 1 ступени]
 
 
 @dataclass
@@ -84,6 +84,8 @@ class Stage2Result:
             "feasible_units": float(lines["feasible"].sum()),
             "materials_short": int((self.materials["shortage"] > 0).sum()) if len(self.materials) else 0,
             "nfp_shortage_kg": float(self.nfp["shortage_kg"].sum()) if len(self.nfp) else 0.0,
+            "nfp_stage1_orders_kg": float(self.nfp["stage1_orders_kg"].sum()) if len(self.nfp) else 0.0,
+            "nfp_uncovered_kg": float(self.nfp["uncovered_kg"].sum()) if len(self.nfp) else 0.0,
             "month_factors": self.month_factors,
             "warehouses": self.warehouses,
         }
@@ -344,6 +346,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
                 "items": "; ".join(v["items"]),
             }
         )
+    _apply_stage1_orders(nfp_records, data.orders)
     nfp = pd.DataFrame(
         nfp_records,
         columns=[
@@ -356,6 +359,8 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
             "quarantine_ready",
             "unreleased_kg",
             "shortage_kg",
+            "stage1_orders_kg",
+            "uncovered_kg",
             "items",
         ],
     ).sort_values("shortage_kg", ascending=False, ignore_index=True)
@@ -372,3 +377,24 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
             if role != wh.IGNORE and (stock["role"] == role).any()
         },
     )
+
+
+def _apply_stage1_orders(records: list[dict], orders: pd.DataFrame) -> None:
+    """Открытые заказы 1 ступени покрывают дефицит НФП той же фракции.
+
+    Назначение в заказе 1 ступени не указано, поэтому объём заказов по (НФП, фракция)
+    распределяется по строкам дефицита с разными назначениями, начиная с большего дефицита.
+    """
+    for r in records:
+        r["stage1_orders_kg"], r["uncovered_kg"] = 0.0, r["shortage_kg"]
+    if "nfp" not in orders.columns:
+        return
+    st1 = orders[(orders["stage"] == 1) & orders["nfp"].notna()]
+    left = st1.groupby(["nfp", "nfp_characteristic"], dropna=False)["qty"].sum().to_dict()
+    for r in sorted(records, key=lambda r: -r["shortage_kg"]):
+        key = (r["nfp"], r["characteristic"])
+        take = min(left.get(key, 0.0), r["shortage_kg"])
+        if take > 0:
+            left[key] -= take
+            r["stage1_orders_kg"] = round(take, 2)
+            r["uncovered_kg"] = round(r["shortage_kg"] - take, 2)

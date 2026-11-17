@@ -7,6 +7,8 @@
 4. нечёткое сравнение имени — такие связи нужно подтвердить в интерфейсе.
 """
 
+import re
+
 import pandas as pd
 from rapidfuzz import fuzz, process
 
@@ -51,8 +53,18 @@ def match_items_to_specs(items: pd.DataFrame, specs: pd.DataFrame) -> pd.DataFra
     return pd.DataFrame(rows, columns=MATCH_COLUMNS)
 
 
+_MARKED = re.compile(r"\(\s*маркированн\w*\s*\)", re.IGNORECASE)
+
+
 def match_to_catalog(names: pd.Series, catalog: pd.Series) -> pd.Series:
     """Для каждого имени из отчёта — имя из справочника ГП (точно или после нормализации), иначе None."""
     exact = set(catalog)
     by_norm = {norm_name(c): c for c in catalog}
-    return names.map(lambda n: n if n in exact else by_norm.get(norm_name(n)))
+
+    def find(n: str):
+        if n in exact:
+            return n
+        # «… 20х1,5 г (маркированный)» — спецификация с маркировкой, ГП в справочнике та же
+        return by_norm.get(norm_name(n)) or by_norm.get(norm_name(_MARKED.sub("", n)))
+
+    return names.map(find)

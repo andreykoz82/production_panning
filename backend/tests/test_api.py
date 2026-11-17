@@ -87,6 +87,16 @@ def test_calendars_and_gantt(client, data_dir):
     tl = client.get("/api/schedule").json()
     task = next(t for t in tl["tasks"] if t["line_code"] and t["line_group"] == "Линия ББЛ")
     assert tl["off"] and tl["load"]
+    # остаток к выпуску; начатые в 1С этапы стоят на линии из 1С и идут первыми
+    assert all(t["qty"] == t["qty_plan"] - t["qty_done"] for t in tl["tasks"])
+    started = [t for t in tl["tasks"] if t["status"] == "Начат"]
+    assert started and all(t["line_locked"] for t in started)
+    assert all(t["line_1c"] for t in tl["tasks"])
+    bbl = sorted(
+        (t for t in tl["tasks"] if t["line_code"] == "BBL-1" and t["start"]), key=lambda t: t["start"]
+    )
+    statuses = [t["status"] for t in bbl]
+    assert statuses == sorted(statuses, key=lambda s: s != "Начат")
 
     # выбор линии закрепляет только линию, время считается автоматически
     other = "BBL-1" if task["line_code"] != "BBL-1" else "BBL-2"
