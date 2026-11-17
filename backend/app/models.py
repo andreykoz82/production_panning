@@ -126,3 +126,46 @@ class PlanRun(Base):
     lines: Mapped[list] = mapped_column(JSON)
     materials: Mapped[list] = mapped_column(JSON)
     nfp: Mapped[list] = mapped_column(JSON)
+
+
+class LineTemplate(Base):
+    """Режим работы линии: «5/2» или «24/7» и смен в день."""
+
+    __tablename__ = "line_template"
+
+    line_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(10))
+    shifts: Mapped[int] = mapped_column(Integer)
+
+
+class LineDay(Base):
+    """Ручная правка календаря линии на день."""
+
+    __tablename__ = "line_day"
+
+    line_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    shifts: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str | None] = mapped_column(String(200))
+
+
+class ScheduleTask(Base):
+    """Заказ 2 ступени на диаграмме Ганта. Ключ — номер заказа 1С."""
+
+    __tablename__ = "schedule_task"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[str] = mapped_column(String(50), unique=True)
+    stage: Mapped[int] = mapped_column(Integer, default=2)
+    item: Mapped[str] = mapped_column(String(300))
+    qty: Mapped[float] = mapped_column(Float)
+    line_group: Mapped[str | None] = mapped_column(String(100))
+    line_code: Mapped[str | None] = mapped_column(String(30))
+    start: Mapped[datetime | None] = mapped_column(DateTime)
+    end: Mapped[datetime | None] = mapped_column(DateTime)
+    hours: Mapped[float] = mapped_column(Float, default=0)
+    changeover: Mapped[bool] = mapped_column(Boolean, default=False)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    available_from: Mapped[date | None] = mapped_column(Date)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

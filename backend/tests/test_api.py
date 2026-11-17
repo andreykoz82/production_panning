@@ -74,3 +74,46 @@ def test_stage2_run_and_export(client, data_dir):
 
 def test_stage2_without_snapshot(client):
     assert client.post("/api/planning/stage2", json={"horizon_months": 3}).status_code == 404
+
+
+def test_calendars_and_gantt(client, data_dir):
+    client.post("/api/imports/from-folder")
+    client.post("/api/planning/stage2", json={"horizon_months": 3})
+    grid = client.get("/api/calendars", params={"month": "2026-11"}).json()
+    assert len(grid["days"]) == 30 and any(line["line_code"] == "BBL-1" for line in grid["lines"])
+
+    sync = client.post("/api/schedule/sync").json()
+    assert sync["added"] == sync["total"] == sync["tasks"] > 0
+    tl = client.get("/api/schedule").json()
+    task = next(t for t in tl["tasks"] if t["line_code"] and t["line_group"] == "Линия ББЛ")
+    assert tl["off"] and tl["load"]
+
+    # перетаскивание фиксирует заказ; на линию другой группы — нельзя
+    other = "BBL-1" if task["line_code"] != "BBL-1" else "BBL-2"
+    assert client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": other}).status_code == 200
+    moved = next(t for t in client.get("/api/schedule").json()["tasks"] if t["id"] == task["id"])
+    assert moved["locked"] and moved["line_code"] == other
+    bad = client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": "IMA C51"})
+    assert bad.status_code == 422
+
+    # календарь: шаблон 24/7 и правка дня
+    assert (
+        client.put(
+            "/api/calendars/template", json={"line_code": "BBL-1", "mode": "24/7", "shifts": 3}
+        ).status_code
+        == 200
+    )
+    change = {"changes": [{"line_code": "BBL-2", "day": "2026-11-21", "shifts": 2, "reason": "аврал"}]}
+    assert client.put("/api/calendars/days", json=change).status_code == 200
+    grid = client.get("/api/calendars", params={"month": "2026-11"}).json()
+    bbl2 = next(line for line in grid["lines"] if line["line_code"] == "BBL-2")
+    day = next(d for d in bbl2["days"] if d["day"] == "2026-11-21")
+    assert day["shifts"] == 2 and day["manual"] and day["reason"] == "аврал"
+    assert (
+        client.delete("/api/calendars/month", params={"month": "2026-11", "line_code": "BBL-2"}).status_code
+        == 200
+    )
+
+
+def test_sync_without_snapshot(client):
+    assert client.post("/api/schedule/sync").status_code == 404

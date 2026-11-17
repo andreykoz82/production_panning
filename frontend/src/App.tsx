@@ -1,18 +1,24 @@
-import { AppShell, Group, NavLink, Text, Title } from '@mantine/core'
-import { useState } from 'react'
+import { AppShell, Group, Loader, NavLink, Text, Title } from '@mantine/core'
+import { lazy, Suspense, useState } from 'react'
 
+import CalendarsPage from './pages/CalendarsPage'
 import ImportPage from './pages/ImportPage'
 import LinesPage from './pages/LinesPage'
 import Stage2Page from './pages/Stage2Page'
 
+// Гант тянет vis-timeline — грузим только при открытии
+const GanttPage = lazy(() => import('./pages/GanttPage'))
+
 const PAGES = [
   { key: 'import', label: 'Импорт данных 1С', element: <ImportPage /> },
   { key: 'stage2', label: 'Потребность 2 ступени', element: <Stage2Page /> },
+  { key: 'gantt', label: 'Гант 2 ступени', element: <GanttPage /> },
+  { key: 'calendars', label: 'Календари линий', element: <CalendarsPage /> },
   { key: 'lines', label: 'Линии и мощности', element: <LinesPage /> },
 ] as const
 
-// Следующие этапы: календари линий, Гант, 1 ступень
-const PLANNED = ['Календари линий', 'Гант 2 ступени', '1 ступень']
+// Следующие этапы
+const PLANNED = ['Потребность 1 ступени', 'Гант 1 ступени']
 
 export default function App() {
   const [page, setPage] = useState<string>('import')
@@ -36,7 +42,9 @@ export default function App() {
           <NavLink key={label} label={label} disabled description="следующий этап" />
         ))}
       </AppShell.Navbar>
-      <AppShell.Main>{current.element}</AppShell.Main>
+      <AppShell.Main>
+        <Suspense fallback={<Loader />}>{current.element}</Suspense>
+      </AppShell.Main>
     </AppShell>
   )
 }

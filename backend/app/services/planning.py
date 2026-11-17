@@ -16,28 +16,16 @@ def _frame(session: Session, model, snapshot_id: int, columns: list[str], *where
     return pd.DataFrame(session.execute(q).all(), columns=columns)
 
 
-def load_planning_data(session: Session, snapshot_id: int) -> PlanningData:
+def load_planning_data(session: Session, snapshot_id: int, with_reserve: bool = False) -> PlanningData:
     items = _frame(
         session,
         models.Item,
         snapshot_id,
         ["name", "abc", "line_group", "nfp", "purpose", "in_scope", "spec"],
     )
-    stock = _frame(
-        session,
-        models.StockRow,
-        snapshot_id,
-        [
-            "warehouse",
-            "name",
-            "item",
-            "characteristic",
-            "purpose",
-            "packing_allowed",
-            "available",
-            "is_defect",
-        ],
-    )
+    stock_cols = ["warehouse", "name", "item", "characteristic", "purpose", "packing_allowed", "available"]
+    stock_cols += ["is_defect"] + (["reserved"] if with_reserve else [])
+    stock = _frame(session, models.StockRow, snapshot_id, stock_cols)
     specs = _frame(
         session,
         models.SpecLine,
