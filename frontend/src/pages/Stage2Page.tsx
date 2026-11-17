@@ -26,6 +26,16 @@ const month = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString('ru-RU', { month: 'short', year: 'numeric' }) : 'не кончится'
 const dmy = (iso: string) => new Date(iso).toLocaleDateString('ru-RU')
 
+const WAREHOUSE_ROLE: Record<string, string> = {
+  gp_cert: 'ГП на сертификации',
+  gp_sale: 'ГП к продаже',
+  nfp: 'НФП',
+  nfp_quarantine: 'НФП на карантине',
+  byproducts: 'ПП',
+  raw: 'сырьё',
+  materials: 'упаковка',
+}
+
 const STATUS_COLOR: Record<Stage2Status, string> = {
   'Можно фасовать': 'teal',
   Частично: 'yellow',
@@ -161,6 +171,14 @@ export default function Stage2Page() {
             <Stat label="Материалов в дефиците" value={s.materials_short} />
             <Stat label="Выпустить НФП на 1 ступени" value={`${kg.format(s.nfp_shortage_kg)} кг`} hint="с учётом карантина" />
           </SimpleGrid>
+          {s.warehouses && (
+            <Text size="xs" c="dimmed">
+              Учтены склады:{' '}
+              {Object.entries(s.warehouses)
+                .map(([role, names]) => `${WAREHOUSE_ROLE[role] ?? role} — ${names.join(', ')}`)
+                .join('; ')}
+            </Text>
+          )}
           <Text size="xs" c="dimmed">
             Доля плана в горизонте:{' '}
             {Object.entries(s.month_factors)

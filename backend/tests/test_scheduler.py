@@ -75,3 +75,9 @@ def test_week_load():
     schedule([t], {"BBL-2": LineCalendar(shifts=0), "BBL-3": LineCalendar(shifts=0)}, START)
     row = week_load([t], {}, ["BBL-1"], date(2026, 11, 16), 1)[0]
     assert row["available_hours"] == 40 and row["busy_hours"] == 9
+
+
+def test_pinned_line_with_automatic_time():
+    t = Task("КЛ1", "Мята", 2000, "Линия ББЛ", line_code="BBL-3", line_locked=True)
+    schedule([t], {}, START)
+    assert t.line_code == "BBL-3" and t.start == START and not t.locked

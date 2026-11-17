@@ -9,11 +9,16 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.planning.stage2 import PlanningData, Stage2Params, Stage2Result, calculate_stage2
+from app.reference import warehouses as wh
 
 
 def _frame(session: Session, model, snapshot_id: int, columns: list[str], *where) -> pd.DataFrame:
     q = select(*[getattr(model, c) for c in columns]).where(model.snapshot_id == snapshot_id, *where)
     return pd.DataFrame(session.execute(q).all(), columns=columns)
+
+
+def warehouse_overrides(session: Session) -> dict[str, str]:
+    return dict(session.execute(select(models.WarehouseRole.warehouse, models.WarehouseRole.role)).all())
 
 
 def load_planning_data(session: Session, snapshot_id: int, with_reserve: bool = False) -> PlanningData:
@@ -25,7 +30,9 @@ def load_planning_data(session: Session, snapshot_id: int, with_reserve: bool = 
     )
     stock_cols = ["warehouse", "name", "item", "characteristic", "purpose", "packing_allowed", "available"]
     stock_cols += ["is_defect"] + (["reserved"] if with_reserve else [])
-    stock = _frame(session, models.StockRow, snapshot_id, stock_cols)
+    stock = wh.with_roles(
+        _frame(session, models.StockRow, snapshot_id, stock_cols), warehouse_overrides(session)
+    )
     specs = _frame(
         session,
         models.SpecLine,

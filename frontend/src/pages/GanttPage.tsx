@@ -1,7 +1,7 @@
 import 'vis-timeline/styles/vis-timeline-graph2d.min.css'
 import './gantt.css'
 
-import { Alert, Badge, Box, Button, Group, ScrollArea, Stack, Switch, Table, Text, Title, Tooltip } from '@mantine/core'
+import { Alert, Badge, Box, Button, Group, ScrollArea, Select, Stack, Switch, Table, Text, Title, Tooltip } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Timeline, type TimelineGroup, type TimelineItem, type TimelineOptions } from 'vis-timeline/standalone'
 
@@ -26,7 +26,7 @@ function tooltip(t: ScheduleTask) {
     `${num.format(t.qty)} шт · ${t.hours} ч${t.changeover ? ' (с переналадкой 1 ч)' : ''}`,
     `${fmt(t.start)} — ${fmt(t.end)}`,
     `ГП к продаже: ${fmtDate(t.available_from)}`,
-    t.locked ? 'Зафиксирован вручную' : 'Расставлен автоматически',
+    t.locked ? 'Время и линия зафиксированы вручную' : t.line_locked ? 'Линия закреплена вручную, время — автоматически' : 'Расставлен автоматически',
     ...t.warnings.map((w) => `⚠ ${w}`),
   ]
   return lines.join('<br>')
@@ -116,7 +116,7 @@ export default function GanttPage() {
           group: t.line_code!,
           start: new Date(t.start!),
           end: new Date(t.end!),
-          content: `${t.locked ? '📌 ' : ''}${t.item} · ${num.format(t.qty)}`,
+          content: `${t.locked ? '📌 ' : t.line_locked ? '📍 ' : ''}${t.item} · ${num.format(t.qty)}`,
           title: tooltip(t),
           className: ['task', t.warnings.length ? 'warn' : '', t.locked ? 'locked' : ''].join(' '),
         })),
@@ -160,6 +160,7 @@ export default function GanttPage() {
         <Text c="dimmed" size="sm">
           Открытые заказы из 1С расставляются по линиям своей группы с учётом календаря, переналадки 1 ч и приоритета из
           последнего расчёта потребности. Перетащите заказ — он зафиксируется (📌), остальные перестроятся вокруг.
+          Линию можно выбрать в таблице заказов (📍): линия закрепится, а время подберётся автоматически.
         </Text>
       </div>
       <Group>
@@ -239,17 +240,38 @@ export default function GanttPage() {
                 <Table.Th>Начало</Table.Th>
                 <Table.Th>Окончание</Table.Th>
                 <Table.Th>ГП к продаже</Table.Th>
-                <Table.Th>Зафиксирован</Table.Th>
+                <Table.Th>Время зафиксировано</Table.Th>
                 <Table.Th>Предупреждения</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {tasks.map((t) => (
                 <Table.Tr key={t.id}>
-                  <Table.Td>{t.number}</Table.Td>
+                  <Table.Td style={{ whiteSpace: 'nowrap' }}>{t.number}</Table.Td>
                   <Table.Td>{t.item}</Table.Td>
                   <Table.Td ta="right">{num.format(t.qty)}</Table.Td>
-                  <Table.Td>{t.line_code ?? '—'}</Table.Td>
+                  <Table.Td>
+                    <Select
+                      size="xs"
+                      w={150}
+                      allowDeselect={false}
+                      value={t.line_locked || t.locked ? t.line_code : 'auto'}
+                      data={[
+                        { value: 'auto', label: `Авто${t.line_code && !t.line_locked && !t.locked ? ` (${t.line_code})` : ''}` },
+                        ...(data?.lines ?? []).filter((l) => l.group === t.line_group).map((l) => ({ value: l.code, label: l.code })),
+                      ]}
+                      onChange={(v) => {
+                        if (!v) return
+                        act(
+                          () =>
+                            v === 'auto'
+                              ? scheduleApi.patchTask(t.id, { pin_line: false, locked: false })
+                              : scheduleApi.patchTask(t.id, { line_code: v, pin_line: true }),
+                          () => (v === 'auto' ? `Заказ ${t.number}: линия выбирается автоматически` : `Заказ ${t.number} закреплён за ${v}`),
+                        )
+                      }}
+                    />
+                  </Table.Td>
                   <Table.Td>{fmt(t.start)}</Table.Td>
                   <Table.Td>{fmt(t.end)}</Table.Td>
                   <Table.Td>{fmtDate(t.available_from)}</Table.Td>

@@ -11,12 +11,7 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 
-from app.importers.stock import (
-    GP_WAREHOUSES,
-    WAREHOUSE_NFP,
-    WAREHOUSE_NFP_QUARANTINE,
-    WAREHOUSE_RAW,
-)
+from app.reference import warehouses as wh
 from app.reference.lines import STAGE2_GROUPS
 
 if TYPE_CHECKING:
@@ -119,8 +114,15 @@ def check_quality(r: ImportResult, today: date) -> list[Issue]:
         )
 
     # --- Остатки
-    stock = r.stock
-    defect = stock[stock["is_defect"] & stock["warehouse"].isin(GP_WAREHOUSES)]
+    stock = wh.with_roles(r.stock)
+    for name in sorted(set(stock["warehouse"]) - set(wh.DEFAULT_ROLES)):
+        add(
+            "warning",
+            "stock",
+            None,
+            f"Новый склад «{name}» пока не учитывается в расчёте — назначьте роль в разделе «Склады»",
+        )
+    defect = stock[stock["is_defect"] & stock["role"].isin(wh.GP_ROLES)]
     if len(defect):
         add(
             "info",
@@ -129,8 +131,8 @@ def check_quality(r: ImportResult, today: date) -> list[Issue]:
             f"Исключено строк брака на складах ГП: {len(defect)} "
             f"({defect['on_hand'].sum():,.0f} шт.)".replace(",", " "),
         )
-    nfp_stock = set(stock.loc[stock["warehouse"].isin((WAREHOUSE_NFP, WAREHOUSE_NFP_QUARANTINE)), "name"])
-    raw_stock = set(stock.loc[stock["warehouse"] == WAREHOUSE_RAW, "name"])
+    nfp_stock = set(stock.loc[stock["role"].isin((wh.NFP, wh.NFP_QUARANTINE)), "name"])
+    raw_stock = set(stock.loc[stock["role"] == wh.RAW, "name"])
     for row in scope.itertuples():
         if not row.nfp or row.nfp != row.nfp or row.nfp in nfp_stock:
             continue

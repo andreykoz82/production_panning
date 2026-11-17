@@ -5,6 +5,7 @@ import CalendarsPage from './pages/CalendarsPage'
 import ImportPage from './pages/ImportPage'
 import LinesPage from './pages/LinesPage'
 import Stage2Page from './pages/Stage2Page'
+import WarehousesPage from './pages/WarehousesPage'
 
 // Гант тянет vis-timeline — грузим только при открытии
 const GanttPage = lazy(() => import('./pages/GanttPage'))
@@ -14,6 +15,7 @@ const PAGES = [
   { key: 'stage2', label: 'Потребность 2 ступени', element: <Stage2Page /> },
   { key: 'gantt', label: 'Гант 2 ступени', element: <GanttPage /> },
   { key: 'calendars', label: 'Календари линий', element: <CalendarsPage /> },
+  { key: 'warehouses', label: 'Склады', element: <WarehousesPage /> },
   { key: 'lines', label: 'Линии и мощности', element: <LinesPage /> },
 ] as const
 
