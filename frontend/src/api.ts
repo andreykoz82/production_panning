@@ -142,6 +142,7 @@ export interface PlanRun {
     materials_short: number
     nfp_shortage_kg: number
     month_factors: Record<string, number>
+    warehouses?: Record<string, string[]>
   }
 }
 
@@ -201,6 +202,7 @@ export interface ScheduleTask {
   hours: number
   changeover: boolean
   locked: boolean
+  line_locked: boolean
   available_from: string | null
   warnings: string[]
 }
@@ -231,6 +233,22 @@ export const scheduleApi = {
   schedule: (from: string, to: string) => request<Schedule>(`/api/schedule?from=${from}&to=${to}`),
   sync: () => request<{ added: number; updated: number; removed: number; total: number }>('/api/schedule/sync', { method: 'POST' }),
   replan: () => request('/api/schedule/replan', { method: 'POST' }),
-  patchTask: (id: number, patch: { line_code?: string; start?: string; locked?: boolean }) =>
+  patchTask: (id: number, patch: { line_code?: string; start?: string; locked?: boolean; pin_line?: boolean }) =>
     request(`/api/schedule/tasks/${id}`, json('PATCH', patch)),
+}
+
+export interface WarehouseInfo {
+  warehouse: string
+  role: string
+  default_role: string
+  manual: boolean
+  known: boolean
+  rows: number
+  available: number
+  in_snapshot: boolean
+}
+
+export const warehouseApi = {
+  list: () => request<{ roles: Record<string, string>; warehouses: WarehouseInfo[] }>('/api/warehouses'),
+  setRole: (warehouse: string, role: string | null) => request('/api/warehouses', json('PUT', { warehouse, role })),
 }

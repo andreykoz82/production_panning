@@ -22,14 +22,8 @@ from datetime import date
 import pandas as pd
 
 from app.importers.specs import analog_key
-from app.importers.stock import (
-    GP_WAREHOUSES,
-    WAREHOUSE_MATERIALS,
-    WAREHOUSE_NFP,
-    WAREHOUSE_NFP_QUARANTINE,
-    WAREHOUSE_RAW,
-)
 from app.planning.calendar import add_months, add_workdays, month_end, workdays, workdays_in_month
+from app.reference import warehouses as wh
 from app.reference.lines import NFP_QUARANTINE_WORKDAYS, STAGE2_GROUPS, lines_in_group
 
 ABC_ORDER = {"A": 0, "B": 1, "C": 2}
@@ -72,6 +66,7 @@ class Stage2Result:
     materials: pd.DataFrame
     nfp: pd.DataFrame
     month_factors: dict[str, float] = field(default_factory=dict)
+    warehouses: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def summary(self) -> dict:
@@ -90,6 +85,7 @@ class Stage2Result:
             "materials_short": int((self.materials["shortage"] > 0).sum()) if len(self.materials) else 0,
             "nfp_shortage_kg": float(self.nfp["shortage_kg"].sum()) if len(self.nfp) else 0.0,
             "month_factors": self.month_factors,
+            "warehouses": self.warehouses,
         }
 
 
@@ -146,28 +142,28 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
     for item, month, qty in plan[["item", "month", "qty"]].itertuples(index=False):
         plan_by_item.setdefault(item, {})[month] = plan_by_item.get(item, {}).get(month, 0.0) + qty
 
-    stock = data.stock
-    gp = stock[stock["warehouse"].isin(GP_WAREHOUSES) & ~stock["is_defect"] & stock["item"].notna()]
+    stock = data.stock if "role" in data.stock.columns else wh.with_roles(data.stock)
+    gp = stock[stock["role"].isin(wh.GP_ROLES) & ~stock["is_defect"] & stock["item"].notna()]
     gp_stock = gp.groupby("item")["available"].sum()
-    gp_cert = gp[gp["warehouse"] == GP_WAREHOUSES[0]].groupby("item")["available"].sum()
+    gp_cert = gp[gp["role"] == wh.GP_CERT].groupby("item")["available"].sum()
     orders = data.orders[(data.orders["stage"] == 2) & data.orders["item"].notna()]
     open_orders = orders.groupby("item")["qty"].sum()
 
     # --- НФП: пулы по (наименование, фракция, назначение)
-    nfp_rows = stock[stock["warehouse"] == WAREHOUSE_NFP]
+    nfp_rows = stock[stock["role"] == wh.NFP]
     key_cols = ["name", "characteristic", "purpose"]
     released = nfp_rows[nfp_rows["packing_allowed"] == True]  # noqa: E712 — None означает «не указано»
     unreleased = nfp_rows[nfp_rows["packing_allowed"] != True]  # noqa: E712
-    quarantine = stock[stock["warehouse"] == WAREHOUSE_NFP_QUARANTINE]
+    quarantine = stock[stock["role"] == wh.NFP_QUARANTINE]
     nfp_pool = _Pool(released.groupby(key_cols, dropna=False)["available"].sum().to_dict())
     nfp_unreleased = unreleased.groupby(key_cols, dropna=False)["available"].sum().to_dict()
     nfp_quarantine = quarantine.groupby(key_cols, dropna=False)["available"].sum().to_dict()
     nfp_names_on_nfp_wh = set(nfp_rows["name"]) | set(quarantine["name"])
-    raw = stock[stock["warehouse"] == WAREHOUSE_RAW]
+    raw = stock[stock["role"] == wh.RAW]
     purchased_pool = _Pool(raw.groupby("name")["available"].sum().to_dict())
 
     # --- Материалы: пулы по ключу аналогов
-    mats = stock[stock["warehouse"] == WAREHOUSE_MATERIALS]
+    mats = stock[stock["role"] == wh.MATERIALS]
     mat_pool = _Pool(mats.assign(k=mats["name"].map(analog_key)).groupby("k")["available"].sum().to_dict())
     mat_names: dict[str, str] = {}
 
@@ -370,4 +366,9 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
         materials=materials,
         nfp=nfp,
         month_factors={m.isoformat(): round(f, 4) for m, f in factors.items()},
+        warehouses={
+            role: sorted(set(stock.loc[stock["role"] == role, "warehouse"]))
+            for role in wh.ROLES
+            if role != wh.IGNORE and (stock["role"] == role).any()
+        },
     )

@@ -88,12 +88,19 @@ def test_calendars_and_gantt(client, data_dir):
     task = next(t for t in tl["tasks"] if t["line_code"] and t["line_group"] == "Линия ББЛ")
     assert tl["off"] and tl["load"]
 
-    # перетаскивание фиксирует заказ; на линию другой группы — нельзя
+    # выбор линии закрепляет только линию, время считается автоматически
     other = "BBL-1" if task["line_code"] != "BBL-1" else "BBL-2"
-    assert client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": other}).status_code == 200
+    r = client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": other, "pin_line": True})
+    assert r.status_code == 200
     moved = next(t for t in client.get("/api/schedule").json()["tasks"] if t["id"] == task["id"])
-    assert moved["locked"] and moved["line_code"] == other
-    bad = client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": "IMA C51"})
+    assert moved["line_code"] == other and moved["line_locked"] and not moved["locked"]
+    # перетаскивание фиксирует и время
+    start = moved["start"]
+    client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": other, "start": start})
+    moved = next(t for t in client.get("/api/schedule").json()["tasks"] if t["id"] == task["id"])
+    assert moved["locked"] and moved["start"] == start
+    # на линию другой группы — нельзя
+    bad = client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": "IMA C51", "pin_line": True})
     assert bad.status_code == 422
 
     # календарь: шаблон 24/7 и правка дня
@@ -117,3 +124,29 @@ def test_calendars_and_gantt(client, data_dir):
 
 def test_sync_without_snapshot(client):
     assert client.post("/api/schedule/sync").status_code == 404
+
+
+def test_warehouse_roles(client, data_dir):
+    client.post("/api/imports/from-folder")
+    data = client.get("/api/warehouses").json()
+    roles = {w["warehouse"]: w for w in data["warehouses"]}
+    assert roles["Кладовая 2 ступени производства"]["role"] == "materials"
+    assert roles["Производство 2 ступени"]["role"] == "ignore"
+    run1 = client.post("/api/planning/stage2", json={"horizon_months": 3}).json()
+    assert "Кладовая 2 ступени производства" in run1["summary"]["warehouses"]["materials"]
+
+    r = client.put("/api/warehouses", json={"warehouse": "Кладовая 2 ступени производства", "role": "ignore"})
+    assert r.status_code == 200
+    w = next(
+        x for x in client.get("/api/warehouses").json()["warehouses"] if x["warehouse"].startswith("Кладовая")
+    )
+    assert w["role"] == "ignore" and w["manual"]
+    run2 = client.post("/api/planning/stage2", json={"horizon_months": 3}).json()
+    assert "Кладовая 2 ступени производства" not in run2["summary"]["warehouses"].get("materials", [])
+
+    client.put("/api/warehouses", json={"warehouse": "Кладовая 2 ступени производства", "role": None})
+    w = next(
+        x for x in client.get("/api/warehouses").json()["warehouses"] if x["warehouse"].startswith("Кладовая")
+    )
+    assert w["role"] == "materials" and not w["manual"]
+    assert client.put("/api/warehouses", json={"warehouse": "X", "role": "nonsense"}).status_code == 422

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.planning.calendar import add_workdays, is_workday
+from app.reference import warehouses as wh
 from app.reference.lines import (
     GP_CERTIFICATION_DAYS,
     LINES,
@@ -179,17 +180,12 @@ def _nfp_warnings(session: Session, snapshot_id: int, tasks: list[Task], today: 
     stock = data.stock.assign(qty=data.stock["available"] + data.stock["reserved"])
     key_cols = ["name", "characteristic", "purpose"]
     released = stock["packing_allowed"] == True  # noqa: E712 — None значит «не указано»
-    nfp_wh = stock[(stock["warehouse"] == "Склад нерасфасованных продуктов") & released]
-    quarantine = stock[stock["warehouse"] == "Склад НФП (карантинное хранение)"]
-    raw = stock[stock["warehouse"] == "Склад лексырья"].groupby("name")["qty"].sum().to_dict()
+    nfp_wh = stock[(stock["role"] == wh.NFP) & released]
+    quarantine = stock[stock["role"] == wh.NFP_QUARANTINE]
+    raw = stock[stock["role"] == wh.RAW].groupby("name")["qty"].sum().to_dict()
     pool = nfp_wh.groupby(key_cols, dropna=False)["qty"].sum().to_dict()
     q_pool = quarantine.groupby(key_cols, dropna=False)["qty"].sum().to_dict()
-    on_nfp_wh = set(
-        stock.loc[
-            stock["warehouse"].isin(["Склад нерасфасованных продуктов", "Склад НФП (карантинное хранение)"]),
-            "name",
-        ]
-    )
+    on_nfp_wh = set(stock.loc[stock["role"].isin((wh.NFP, wh.NFP_QUARANTINE)), "name"])
     q_ready = add_workdays(today, NFP_QUARANTINE_WORKDAYS)
 
     for t in sorted((t for t in tasks if t.start), key=lambda t: t.start):
@@ -246,6 +242,7 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
                 line_code=db.line_code,
                 start=db.start,
                 locked=db.locked,
+                line_locked=db.line_locked,
             )
         )
     schedule(tasks, load_calendars(session), start, horizon_days)
@@ -267,7 +264,7 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
     for db in db_tasks:
         t = by_key[db.number]
         db.line_code, db.start, db.end = t.line_code, t.start, t.end
-        db.hours, db.changeover, db.locked = t.hours, t.changeover, t.locked
+        db.hours, db.changeover, db.locked, db.line_locked = t.hours, t.changeover, t.locked, t.line_locked
         db.available_from = t.end.date() + timedelta(days=GP_CERTIFICATION_DAYS) if t.end else None
         db.warnings = t.warnings
     session.commit()
@@ -285,8 +282,15 @@ def move_task(
     line_code: str | None,
     start: datetime | None,
     locked: bool | None,
+    pin_line: bool | None = None,
     now: datetime | None = None,
 ) -> None:
+    """Ручная правка заказа.
+
+    - перетаскивание (start, line_code) — фиксирует время и линию;
+    - выбор линии (line_code + pin_line=True) — закрепляет только линию, время считается автоматически;
+    - pin_line=False — снять закрепление линии; locked=False — снять фиксацию времени.
+    """
     task = session.get(models.ScheduleTask, task_id)
     if task is None:
         raise LookupError("Заказ не найден")
@@ -297,12 +301,58 @@ def move_task(
         task.line_code = line_code
     if start is not None:
         task.start = start
+    if pin_line is not None:
+        task.line_locked = pin_line
     if locked is not None:
         task.locked = locked
-    elif line_code is not None or start is not None:
-        task.locked = True  # перетащили вручную — фиксируем
+    elif start is not None:
+        task.locked = True  # перетащили вручную — фиксируем время и линию
     session.commit()
     replan(session, now)
+
+
+# ---------- склады
+
+
+def warehouse_list(session: Session) -> list[dict]:
+    """Склады последнего снимка: роль, сколько строк и остатка."""
+    from sqlalchemy import func
+
+    snapshot_id = latest_snapshot_id(session)
+    overrides = dict(session.execute(select(models.WarehouseRole.warehouse, models.WarehouseRole.role)).all())
+    rows = []
+    if snapshot_id:
+        q = (
+            select(models.StockRow.warehouse, func.count(), func.sum(models.StockRow.available))
+            .where(models.StockRow.snapshot_id == snapshot_id)
+            .group_by(models.StockRow.warehouse)
+        )
+        rows = session.execute(q).all()
+    names = {r[0] for r in rows} | set(overrides)
+    stats = {r[0]: (r[1], r[2] or 0.0) for r in rows}
+    return [
+        {
+            "warehouse": name,
+            "role": wh.role_of(name, overrides),
+            "default_role": wh.role_of(name),
+            "manual": name in overrides,
+            "known": name in wh.DEFAULT_ROLES,
+            "rows": stats.get(name, (0, 0.0))[0],
+            "available": stats.get(name, (0, 0.0))[1],
+            "in_snapshot": name in stats,
+        }
+        for name in sorted(names)
+    ]
+
+
+def set_warehouse_role(session: Session, warehouse: str, role: str | None) -> None:
+    """role=None — вернуть роль по умолчанию."""
+    if role is not None and role not in wh.ROLES:
+        raise ValueError(f"Нет роли {role}")
+    session.execute(delete(models.WarehouseRole).where(models.WarehouseRole.warehouse == warehouse))
+    if role is not None and role != wh.role_of(warehouse):
+        session.add(models.WarehouseRole(warehouse=warehouse, role=role))
+    session.commit()
 
 
 def timeline(session: Session, date_from: date, date_to: date) -> dict:

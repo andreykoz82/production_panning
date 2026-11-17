@@ -36,7 +36,8 @@ class Task:
     priority: float = math.inf
     line_code: str | None = None
     start: datetime | None = None
-    locked: bool = False
+    locked: bool = False  # зафиксированы время и линия
+    line_locked: bool = False  # зафиксирована только линия, время — автоматически
     # результат
     end: datetime | None = None
     changeover: bool = False
@@ -145,6 +146,13 @@ def schedule(
         if not lines:
             t.warnings.append(f"Неизвестная группа линий «{t.group}»")
             continue
+        if t.line_locked:
+            pinned = [ln for ln in lines if ln.code == t.line_code]
+            if pinned:
+                lines = pinned
+            else:
+                t.line_locked = False
+                t.warnings.append("Закреплённая линия не из группы продукта — линия выбрана автоматически")
         best = None
         for line in lines:
             st = state(line)
@@ -159,7 +167,9 @@ def schedule(
                 best = (end, line, pos, need, changeover)
         t.locked = False
         if best is None:
-            t.line_code, t.start, t.end = None, None, None
+            t.start, t.end = None, None
+            if not t.line_locked:
+                t.line_code = None
             t.warnings.append(f"Не помещается в горизонт {horizon_days} дней — добавьте смены в календарь")
             continue
         _, line, pos, need, changeover = best

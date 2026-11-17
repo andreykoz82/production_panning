@@ -8,6 +8,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app import models
+from app.reference.warehouses import ROLES
 
 HEADER_FILL = PatternFill("solid", fgColor="DDEBF7")
 STATUS_FILL = {
@@ -123,6 +124,9 @@ def build_stage2_workbook(run: models.PlanRun) -> bytes:
         ("", ""),
         ("Доля плана месяца в горизонте", ""),
         *[(date.fromisoformat(m).strftime("%m.%Y"), f) for m, f in s["month_factors"].items()],
+        ("", ""),
+        ("Учтённые склады", ""),
+        *[(ROLES.get(role, role), ", ".join(names)) for role, names in s.get("warehouses", {}).items()],
         ("", ""),
         (
             "Правила",

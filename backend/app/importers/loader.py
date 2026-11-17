@@ -13,7 +13,7 @@ from app.importers.orders import parse_orders
 from app.importers.quality import Issue, check_quality
 from app.importers.sales_plan import parse_sales_plan
 from app.importers.specs import effective_specs, is_nfp_component, parse_specs
-from app.importers.stock import GP_WAREHOUSES, parse_stock
+from app.importers.stock import parse_stock
 
 # Как узнаём файл по имени (без учёта регистра)
 FILE_PATTERNS = {
@@ -82,6 +82,7 @@ class ImportResult:
             "plan_from": str(self.sales_plan["month"].min()) if len(self.sales_plan) else None,
             "plan_to": str(self.sales_plan["month"].max()) if len(self.sales_plan) else None,
             "orders_stage2": int((self.orders["stage"] == 2).sum()),
+            "warehouses": sorted(self.stock["warehouse"].unique().tolist()),
             "issues": {
                 sev: sum(1 for i in self.issues if i.severity == sev) for sev in ("error", "warning", "info")
             },
@@ -123,9 +124,8 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
     catalog = items["name"]
     plan["item"] = match_to_catalog(plan["name"], catalog)
     orders["item"] = match_to_catalog(orders["name"], catalog)
-    stock["item"] = None
-    gp_mask = stock["warehouse"].isin(GP_WAREHOUSES)
-    stock.loc[gp_mask, "item"] = match_to_catalog(stock.loc[gp_mask, "name"], catalog)
+    # ссылка на ГП для всех строк: какие склады считать запасом ГП, решают роли складов
+    stock["item"] = match_to_catalog(stock["name"], catalog)
 
     result = ImportResult(
         items=items,

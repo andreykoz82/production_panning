@@ -7,6 +7,7 @@ import pytest
 from app.importers.specs import effective_specs, parse_specs
 from app.importers.stock import WAREHOUSE_GP, WAREHOUSE_WHOLESALE
 from app.reference.lines import EXCLUDED_GROUPS, STAGE2_GROUPS
+from app.reference.warehouses import DEFAULT_ROLES
 
 
 def test_items(imported):
@@ -21,7 +22,7 @@ def test_items(imported):
 def test_stock(imported):
     stock = imported.stock
     assert len(stock) > 1000
-    assert stock["warehouse"].nunique() == 7
+    assert set(stock["warehouse"]) <= set(DEFAULT_ROLES)  # все склады отчёта известны
     assert stock["is_defect"].any()
     aira = stock[
         (stock["name"] == "Аир корневища 75г") & stock["warehouse"].isin([WAREHOUSE_GP, WAREHOUSE_WHOLESALE])

@@ -165,7 +165,17 @@ class ScheduleTask(Base):
     end: Mapped[datetime | None] = mapped_column(DateTime)
     hours: Mapped[float] = mapped_column(Float, default=0)
     changeover: Mapped[bool] = mapped_column(Boolean, default=False)
-    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)  # время и линия зафиксированы
+    line_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # только линия
     available_from: Mapped[date | None] = mapped_column(Date)
     warnings: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class WarehouseRole(Base):
+    """Роль склада, назначенная вручную (переопределяет роль по умолчанию)."""
+
+    __tablename__ = "warehouse_role"
+
+    warehouse: Mapped[str] = mapped_column(String(200), primary_key=True)
+    role: Mapped[str] = mapped_column(String(30))

@@ -50,6 +50,7 @@ class TaskOut(BaseModel):
     hours: float
     changeover: bool
     locked: bool
+    line_locked: bool
     available_from: date | None
     warnings: list[str]
 
@@ -57,7 +58,13 @@ class TaskOut(BaseModel):
 class TaskPatch(BaseModel):
     line_code: str | None = None
     start: datetime | None = None
-    locked: bool | None = None
+    locked: bool | None = Field(None, description="Фиксация времени и линии")
+    pin_line: bool | None = Field(None, description="Закрепить только линию")
+
+
+class WarehouseIn(BaseModel):
+    warehouse: str
+    role: str | None = Field(None, description="null — роль по умолчанию")
 
 
 def _guard(fn, *args):
@@ -126,5 +133,22 @@ def get_schedule(
 
 @router.patch("/api/schedule/tasks/{task_id}")
 def patch_task(task_id: int, body: TaskPatch, session: SessionDep):
-    _guard(svc.move_task, session, task_id, body.line_code, body.start, body.locked)
+    _guard(svc.move_task, session, task_id, body.line_code, body.start, body.locked, body.pin_line)
+    return {"ok": True}
+
+
+# ---------- склады
+
+
+@router.get("/api/warehouses")
+def get_warehouses(session: SessionDep):
+    from app.reference.warehouses import ROLES
+
+    return {"roles": ROLES, "warehouses": svc.warehouse_list(session)}
+
+
+@router.put("/api/warehouses")
+def put_warehouse(body: WarehouseIn, session: SessionDep):
+    _guard(svc.set_warehouse_role, session, body.warehouse, body.role)
+    svc.replan(session)
     return {"ok": True}
