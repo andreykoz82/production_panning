@@ -3,9 +3,10 @@ import './gantt.css'
 
 import { Alert, Badge, Box, Button, Group, ScrollArea, Select, Stack, Switch, Table, Text, Title, Tooltip } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Timeline, type TimelineGroup, type TimelineItem, type TimelineOptions } from 'vis-timeline/standalone'
+import { Timeline, type TimelineOptions } from 'vis-timeline/standalone'
 
 import { scheduleApi, type Schedule, type ScheduleTask } from '../api'
+import { buildGroups, buildItems, esc, timeAxisFormat } from './ganttModel'
 
 const DAY = 86_400_000
 const num = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -22,7 +23,7 @@ function localIso(d: Date) {
 
 function tooltip(t: ScheduleTask) {
   const lines = [
-    `<b>${t.number}</b> · ${t.item}`,
+    `<b>${esc(t.number)}</b> · ${esc(t.item)}`,
     `${num.format(t.qty)} шт · ${t.hours} ч${t.changeover ? ' (с переналадкой 1 ч)' : ''}`,
     ...(t.qty_done ? [`Выпущено ${num.format(t.qty_done)} из ${num.format(t.qty_plan ?? 0)}`] : []),
     `1С: ${t.status ?? '—'}${t.line_1c ? ` · ${t.line_1c}` : ''}${t.started_at ? ` · начат ${fmt(t.started_at)}` : ''}`,
@@ -31,7 +32,7 @@ function tooltip(t: ScheduleTask) {
     t.locked ? 'Время и линия зафиксированы вручную' : t.line_locked ? 'Линия закреплена вручную, время — автоматически' : 'Расставлен автоматически',
     ...t.warnings.map((w) => `⚠ ${w}`),
   ]
-  return lines.join('<br>')
+  return lines.map((l, i) => (i === 0 ? l : esc(l))).join('<br>')
 }
 
 export default function GanttPage() {
@@ -72,76 +73,94 @@ export default function GanttPage() {
     }
   }
 
+  // строки линий, у которых раскрыты этапы (по умолчанию — все)
+  const expanded = useRef<Set<string> | null>(null)
+  const [showTasks, setShowTasks] = useState(true)
+  const longDays = useRef(false)
+
   // создаём таймлайн один раз
   useEffect(() => {
     if (!container.current || timeline.current) return
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
     const options: TimelineOptions = {
       stack: false,
       orientation: 'top',
       locale: 'ru',
-      editable: { updateTime: true, updateGroup: true, add: false, remove: false, overrideItems: false },
+      editable: { updateTime: true, updateGroup: false, add: false, remove: false, overrideItems: false },
       snap: (date) => new Date(Math.round(date.valueOf() / 900_000) * 900_000), // шаг 15 минут
       zoomMin: 6 * 3600_000,
       zoomMax: 180 * DAY,
-      start: new Date(Date.now() - DAY),
-      end: new Date(Date.now() + 21 * DAY),
-      margin: { item: 6 },
+      start: new Date(now.getTime() - DAY),
+      end: new Date(now.getTime() + 9 * DAY),
+      margin: { item: { horizontal: 0, vertical: 4 }, axis: 2 },
       tooltip: { followMouse: true },
       groupOrder: 'order',
+      maxHeight: 720,
+      verticalScroll: true,
+      showCurrentTime: true,
+      format: timeAxisFormat(() => longDays.current) as unknown as TimelineOptions['format'],
+      // разметка подписей собирается в ganttModel из экранированных строк — фильтр vis вырезал бы классы
+      xss: { disabled: true },
     }
-    timeline.current = new Timeline(container.current, [], [], options)
+    const tl = new Timeline(container.current, [], [], options)
+    // полные названия дней недели — пока на экране не больше 10 дней
+    const fitLabels = () => {
+      const w = tl.getWindow()
+      const long = w.end.getTime() - w.start.getTime() <= 10.5 * DAY && (container.current?.clientWidth ?? 0) > 1000
+      if (long !== longDays.current) {
+        longDays.current = long
+        tl.redraw()
+      }
+    }
+    tl.on('rangechanged', fitLabels)
+    fitLabels()
+    // клик по строке линии раскрывает/сворачивает её этапы — запоминаем, чтобы пережить перезагрузку данных
+    tl.on('click', (props: { what?: string; group?: string | number }) => {
+      const g = String(props.group ?? '')
+      if (props.what !== 'group-label' || !g.startsWith('line:') || !expanded.current) return
+      if (expanded.current.has(g)) expanded.current.delete(g)
+      else expanded.current.add(g)
+    })
+    timeline.current = tl
   }, [])
 
   // обновляем данные и обработчик перетаскивания
   useEffect(() => {
     const tl = timeline.current
     if (!tl || !data) return
-    const groups: TimelineGroup[] = data.lines.map((l, i) => ({
-      id: l.code,
-      order: i,
-      content: `<div class="group-name">${l.code}</div><div class="group-sub">${l.group.replace('Линия ', '')}</div>`,
-    }))
-    const items: TimelineItem[] = [
-      ...data.off.map((o, i) => ({
-        id: `off-${i}`,
-        group: o.line_code,
-        start: new Date(o.start),
-        end: new Date(o.end),
-        type: 'background' as const,
-        className: 'off',
-        content: '',
-      })),
-      ...data.tasks
-        .filter((t) => t.line_code && t.start && t.end)
-        .map((t) => ({
-          id: t.id,
-          group: t.line_code!,
-          start: new Date(t.start!),
-          end: new Date(t.end!),
-          content: `${t.status === 'Начат' ? '▶ ' : ''}${t.locked ? '📌 ' : t.line_locked ? '📍 ' : ''}${t.item} · ${num.format(t.qty)}`,
-          title: tooltip(t),
-          className: ['task', t.warnings.length ? 'warn' : '', t.locked ? 'locked' : ''].join(' '),
-        })),
-    ]
-    tl.setGroups(groups)
+    if (!expanded.current) expanded.current = new Set(data.lines.map((l) => `line:${l.code}`))
+    const { items, refs } = buildItems(data, tooltip)
+    tl.setGroups(buildGroups(data, expanded.current))
     tl.setItems(items)
     tl.setOptions({
       onMove: (item, callback) => {
         callback(null) // позицию задаст сервер после перепланирования
-        const task = data.tasks.find((t) => t.id === item.id)
-        if (!task) return
+        const ref = refs.get(String(item.id))
+        if (!ref) return
+        const { task, segment } = ref
+        // сдвиг отрезка = сдвиг всего этапа
+        const start = new Date(new Date(task.start!).getTime() + (new Date(item.start).getTime() - segment.start))
         act(
-          () => scheduleApi.patchTask(task.id, { line_code: String(item.group), start: localIso(new Date(item.start)) }),
-          () => `Заказ ${task.number} зафиксирован; остальные перепланированы`,
+          () => scheduleApi.patchTask(task.id, { line_code: task.line_code ?? undefined, start: localIso(start) }),
+          () => `Этап ${task.number} зафиксирован с ${fmt(localIso(start))}; остальные перепланированы`,
         )
       },
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
+  const toggleAll = (show: boolean) => {
+    setShowTasks(show)
+    if (!data || !timeline.current) return
+    expanded.current = new Set(show ? data.lines.map((l) => `line:${l.code}`) : [])
+    timeline.current.setGroups(buildGroups(data, expanded.current))
+  }
+
   const zoom = (days: number) => {
-    const now = Date.now()
-    timeline.current?.setWindow(new Date(now - DAY / 2), new Date(now + days * DAY))
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    timeline.current?.setWindow(new Date(today.getTime() - DAY), new Date(today.getTime() + days * DAY))
   }
 
   const tasks = useMemo(
@@ -160,10 +179,11 @@ export default function GanttPage() {
       <div>
         <Title order={3}>Гант 2 ступени</Title>
         <Text c="dimmed" size="sm">
-          Открытые заказы из 1С расставляются по линиям своей группы с учётом календаря, переналадки 1 ч и приоритета из
-          последнего расчёта потребности. Перетащите заказ — он зафиксируется (📌), остальные перестроятся вокруг.
-          Линию можно выбрать в таблице заказов (📍): линия закрепится, а время подберётся автоматически.
-          Начатые в 1С этапы (▶) стоят на линии из 1С и идут первыми; на Ганте — остаток «запланировано − выпущено».
+          Как «График этапов производства» в 1С: строка линии со всеми её этапами (бордовым — переналадка 1 ч), под ней —
+          строки этапов; полосы разбиты по рабочим сменам. Клик по названию линии сворачивает её этапы. Этап из своей
+          строки можно перетащить по времени — он зафиксируется (📌), остальные перестроятся вокруг. Линию выбирают в
+          таблице заказов (📍). Начатые в 1С этапы (▶) стоят на линии из 1С и идут первыми; показан остаток
+          «запланировано − выпущено».
         </Text>
       </div>
       <Group>
@@ -178,9 +198,15 @@ export default function GanttPage() {
         </Button>
         <Button.Group>
           <Button variant="default" onClick={() => zoom(3)}>3 дня</Button>
+          <Button variant="default" onClick={() => zoom(9)}>Неделя</Button>
           <Button variant="default" onClick={() => zoom(14)}>2 недели</Button>
           <Button variant="default" onClick={() => zoom(60)}>2 месяца</Button>
         </Button.Group>
+        <Switch
+          label="Этапы под линиями"
+          checked={showTasks}
+          onChange={(e) => toggleAll(e.currentTarget.checked)}
+        />
       </Group>
       {error && <Alert color="red">{error}</Alert>}
       {info && <Alert color="teal" withCloseButton onClose={() => setInfo(null)}>{info}</Alert>}
@@ -188,7 +214,7 @@ export default function GanttPage() {
         <Text c="dimmed">Заказов пока нет — загрузите их из последнего снимка 1С.</Text>
       )}
 
-      <Box className="gantt" ref={container} style={{ border: '1px solid #dee2e6', borderRadius: 8 }} />
+      <Box className="gantt gantt-1c" ref={container} />
 
       {data && data.tasks.length > 0 && (
         <>
@@ -210,7 +236,7 @@ export default function GanttPage() {
               <Table.Tbody>
                 {data.lines.map((l) => (
                   <Table.Tr key={l.code}>
-                    <Table.Td fw={600}>{l.code}</Table.Td>
+                    <Table.Td fw={600}>{l.title ?? l.code}</Table.Td>
                     {weeks.map((w) => {
                       const v = loadOf(l.code, w)
                       const pct = v?.load == null ? null : Math.round(v.load * 100)
