@@ -194,26 +194,41 @@ def _month_label(d: date) -> str:
 def _nfp_warnings(
     session: Session, snapshot_id: int, tasks: list[Task], today: date, started: set[str] = frozenset()
 ) -> None:
-    """Хватит ли НФП к старту заказа. Резерв на складе НФП считаем заготовленным под открытые заказы.
+    """Хватит ли НФП к старту этапа.
 
-    Начатые в 1С этапы забирают свой НФП из остатка, но без предупреждения: НФП под них
-    уже мог быть передан в цех и на складе его не видно.
+    Диспетчер, оформляя этап в 1С, резервирует под него НФП — на складе НФП или на карантине.
+    Поэтому этап сначала берёт зарезервированный НФП (где бы он ни лежал), затем свободный
+    с «Фасовка = Да», затем свободный с карантина, если этап начнётся после его окончания
+    (5 рабочих дней). Начатые этапы НФП уже получили — их не проверяем и из остатка не вычитаем.
     """
     data = load_planning_data(session, snapshot_id, with_reserve=True)
     items = data.items.set_index("name")
     specs = data.specs
-    stock = data.stock.assign(qty=data.stock["available"] + data.stock["reserved"])
+    stock = data.stock
     key_cols = ["name", "characteristic", "purpose"]
     released = stock["packing_allowed"] == True  # noqa: E712 — None значит «не указано»
-    nfp_wh = stock[(stock["role"] == wh.NFP) & released]
-    quarantine = stock[stock["role"] == wh.NFP_QUARANTINE]
-    raw = stock[stock["role"] == wh.RAW].groupby("name")["qty"].sum().to_dict()
-    pool = nfp_wh.groupby(key_cols, dropna=False)["qty"].sum().to_dict()
-    q_pool = quarantine.groupby(key_cols, dropna=False)["qty"].sum().to_dict()
-    on_nfp_wh = set(stock.loc[stock["role"].isin((wh.NFP, wh.NFP_QUARANTINE)), "name"])
+    is_nfp = stock["role"].isin((wh.NFP, wh.NFP_QUARANTINE))
+    reserved = stock[is_nfp].groupby(key_cols, dropna=False)["reserved"].sum().to_dict()
+    free = (
+        stock[(stock["role"] == wh.NFP) & released]
+        .groupby(key_cols, dropna=False)["available"]
+        .sum()
+        .to_dict()
+    )
+    q_free = (
+        stock[stock["role"] == wh.NFP_QUARANTINE].groupby(key_cols, dropna=False)["available"].sum().to_dict()
+    )
+    raw_stock = stock[stock["role"] == wh.RAW]
+    raw = (raw_stock["available"] + raw_stock["reserved"]).groupby(raw_stock["name"]).sum().to_dict()
+    on_nfp_wh = set(stock.loc[is_nfp, "name"])
     q_ready = add_workdays(today, NFP_QUARANTINE_WORKDAYS)
 
-    for t in sorted((t for t in tasks if t.start), key=lambda t: t.start):
+    def take(pool: dict, key, amount: float) -> float:
+        got = min(max(pool.get(key, 0.0), 0.0), amount)
+        pool[key] = pool.get(key, 0.0) - got
+        return got
+
+    for t in sorted((t for t in tasks if t.start and t.key not in started), key=lambda t: t.start):
         if t.item not in items.index:
             continue
         it = items.loc[t.item]
@@ -223,19 +238,15 @@ def _nfp_warnings(
         norm = float(comp["qty_per_1000"].max()) / 1000
         need = t.qty * norm
         if it["nfp"] not in on_nfp_wh and raw.get(it["nfp"], 0) > 0:
-            have = raw.get(it["nfp"], 0.0)
-            raw[it["nfp"]] = have - min(have, need)
+            have = take(raw, it["nfp"], need)
         else:
             key = (it["nfp"], comp["characteristic"].iloc[0], it["purpose"])
-            have = max(pool.get(key, 0.0), 0.0)
-            use = min(have, need)
-            pool[key] = have - use
+            have = take(reserved, key, need)
+            have += take(free, key, need - have)
             if need > have and t.start.date() >= q_ready:
-                extra = min(max(q_pool.get(key, 0.0), 0.0), need - have)
-                q_pool[key] = q_pool.get(key, 0.0) - extra
-                have += extra
+                have += take(q_free, key, need - have)
         # допуск 1 %: резерв в 1С округлён, нормы в спецификации — тоже
-        if t.key not in started and need - have > max(0.01 * need, 1.0):
+        if need - have > max(0.01 * need, 1.0):
             can = math.floor(have / norm) if norm else 0
             t.warnings.append(
                 f"НФП к старту хватит на {_n(can)} шт из {_n(t.qty)}: нужно {_n(need)} кг, есть {_n(have)}"
