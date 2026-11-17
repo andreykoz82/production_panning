@@ -1,33 +1,143 @@
-.gantt .vis-item.task {
-  background: #e6fcf5;
-  border-color: #20c997;
-  color: #087f5b;
+/* Диаграмма Ганта в стиле «Графика этапов производства» 1С */
+
+.gantt-1c {
+  border: 1px solid #c8c8c8;
+  background: #fff;
+  font-family: Arial, 'Segoe UI', sans-serif;
+}
+
+/* шкала времени */
+.gantt-1c .vis-time-axis .vis-text {
+  color: #333;
   font-size: 12px;
 }
-.gantt .vis-item.task.warn {
-  background: #fff4e6;
-  border-color: #fd7e14;
-  color: #a33a00;
-}
-.gantt .vis-item.task.locked {
-  border-width: 2px;
-  border-style: solid;
-  box-shadow: inset 3px 0 0 #495057;
-}
-.gantt .vis-item.task.vis-selected {
-  border-color: #1c7ed6;
-  background: #d0ebff;
-}
-.gantt .vis-item.vis-background.off {
-  background: repeating-linear-gradient(45deg, #f1f3f5, #f1f3f5 4px, #e9ecef 4px, #e9ecef 8px);
-}
-.gantt .vis-label .vis-inner {
-  font-size: 13px;
-}
-.gantt .group-name {
+.gantt-1c .vis-time-axis .vis-text.vis-major {
   font-weight: 600;
 }
-.gantt .group-sub {
+.gantt-1c .vis-time-axis .vis-grid.vis-minor {
+  border-color: #e4e4e4;
+}
+.gantt-1c .vis-time-axis .vis-grid.vis-saturday,
+.gantt-1c .vis-time-axis .vis-grid.vis-sunday {
+  background: #fafafa;
+}
+.gantt-1c .vis-panel.vis-top,
+.gantt-1c .vis-panel.vis-left,
+.gantt-1c .vis-panel.vis-center {
+  border-color: #c8c8c8;
+}
+.gantt-1c .vis-current-time {
+  background-color: #e03131;
+  width: 1px;
+}
+
+/* левая колонка: линии и этапы */
+.gantt-1c .vis-labelset .vis-label {
+  border-bottom: 1px solid #ececec;
+  color: #333;
+}
+.gantt-1c .vis-labelset .vis-label .vis-inner {
+  font-size: 12px;
+  max-width: 420px;
+  padding: 3px 8px 3px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gantt-1c .vis-labelset .vis-label.line-row {
+  background: #f7f7f7;
+}
+.gantt-1c .vis-labelset .vis-label.line-row .vis-inner {
+  font-size: 13px;
+}
+.gantt-1c .line-title {
+  font-weight: 600;
+}
+.gantt-1c .vis-labelset .vis-label {
+  display: flex;
+  align-items: center;
+}
+.gantt-1c .vis-label.vis-nesting-group:before {
+  width: 18px;
+  padding-left: 4px;
+  color: #555;
+  font-size: 13px;
+}
+.gantt-1c .vis-label.vis-nesting-group.expanded:before {
+  content: '⊖';
+}
+.gantt-1c .vis-label.vis-nesting-group.collapsed:before {
+  content: '⊕';
+}
+.gantt-1c .vis-label.vis-nested-group.vis-group-level-1 {
+  background: #fff;
+}
+.gantt-1c .vis-ltr .vis-label.vis-nested-group.vis-group-level-1 .vis-inner {
+  padding-left: 26px;
+}
+.gantt-1c .task-title.warn {
+  color: #c2410c;
+}
+
+/* строки на поле диаграммы */
+.gantt-1c .vis-foreground .vis-group {
+  border-bottom: 1px solid #ececec;
+}
+.gantt-1c .vis-foreground .vis-group.line-row {
+  background: #fafafa;
+}
+
+/* нерабочее время линии — только в строке линии, едва заметно */
+.gantt-1c .vis-item.vis-background.off {
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.gantt-1c .vis-item.vis-range {
+  border-radius: 3px;
   font-size: 11px;
-  color: #868e96;
+}
+.gantt-1c .vis-item .vis-item-content {
+  padding: 1px 4px;
+}
+
+/* сводная полоса линии — тёмно-зелёная, как в 1С */
+.gantt-1c .vis-item.seg-line {
+  background: #6aa529;
+  border: 1px solid #2f5d0d;
+  color: #10240a;
+}
+.gantt-1c .vis-item.seg-line.warn {
+  background: #f59f00;
+  border-color: #8a5100;
+}
+.gantt-1c .vis-item.changeover {
+  background: #8c1c3c;
+  border: 1px solid #5a0f25;
+  border-radius: 1px;
+}
+
+/* этап — светло-зелёный прямоугольник в своей строке */
+.gantt-1c .vis-item.seg-task {
+  background: #c9f7c9;
+  border: 1px solid #2f7a2f;
+}
+.gantt-1c .vis-item.seg-task.started {
+  background: #a7eda7;
+}
+.gantt-1c .vis-item.seg-task.warn {
+  background: #ffe1b8;
+  border-color: #d9480f;
+}
+.gantt-1c .vis-item.seg-task.locked,
+.gantt-1c .vis-item.seg-line.locked {
+  border-width: 2px;
+  border-color: #1f3a0a;
+}
+.gantt-1c .vis-item.vis-selected {
+  border-color: #1c7ed6;
+  box-shadow: 0 0 0 1px #1c7ed6;
+}
+.gantt-1c .mk-started {
+  color: #2f9e44;
+  font-size: 10px;
 }

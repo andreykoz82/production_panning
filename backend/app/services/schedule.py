@@ -14,6 +14,7 @@ from app.reference import warehouses as wh
 from app.reference.lines import (
     GP_CERTIFICATION_DAYS,
     LINE_BY_CODE,
+    LINE_TITLES,
     LINES,
     NFP_QUARANTINE_WORKDAYS,
     STAGE2_GROUPS,
@@ -273,6 +274,7 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
                 start=db.start,
                 locked=db.locked,
                 line_locked=db.line_locked,
+                in_progress=db.number in started_rank,
             )
         )
     schedule(tasks, load_calendars(session), start, horizon_days)
@@ -418,7 +420,14 @@ def timeline(session: Session, date_from: date, date_to: date) -> dict:
     weeks = max(1, ((date_to - date_from).days // 7) + 1)
     return {
         "lines": [
-            {"code": ln.code, "group": ln.group, "per_hour": ln.per_hour} for ln in LINES if ln.stage == 2
+            {
+                "code": ln.code,
+                "title": LINE_TITLES.get(ln.code, ln.code),
+                "group": ln.group,
+                "per_hour": ln.per_hour,
+            }
+            for ln in LINES
+            if ln.stage == 2
         ],
         "tasks": db_tasks,
         "off": off,

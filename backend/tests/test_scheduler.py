@@ -81,3 +81,21 @@ def test_pinned_line_with_automatic_time():
     t = Task("КЛ1", "Мята", 2000, "Линия ББЛ", line_code="BBL-3", line_locked=True)
     schedule([t], {}, START)
     assert t.line_code == "BBL-3" and t.start == START and not t.locked
+
+
+def test_in_progress_task_first_on_line_has_no_changeover():
+    cals = {"BBL-1": LineCalendar(mode=MODE_24_7, shifts=3)}
+    running = Task(
+        key="1",
+        item="A",
+        qty=17283 / 8,
+        group="Линия ББЛ",
+        priority=-1,
+        line_code="BBL-1",
+        line_locked=True,
+        in_progress=True,
+    )
+    nxt = Task(key="2", item="B", qty=17283 / 8, group="Линия ББЛ", line_code="BBL-1", line_locked=True)
+    schedule([running, nxt], cals, START)
+    assert not running.changeover and running.hours == 1.0
+    assert nxt.changeover and nxt.start == running.end

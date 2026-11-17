@@ -68,6 +68,27 @@ LINES: list[LineSpec] = [
 STAGE2_GROUPS = {line.group for line in LINES if line.stage == 2}
 LINE_BY_CODE = {line.code: line for line in LINES}
 
+# Как линии называются в 1С (для диаграммы Ганта в привычном виде)
+LINE_TITLES = {
+    "Rotoplex-1": "Ротоплекс 1 (ЛИО1)",
+    "Rotoplex-2": "Ротоплекс 2 (ЛИО2)",
+    "Rotoplex-3": "Ротоплекс 3 + Тритек",
+    "Rotoplex-4": "Ротоплекс 4 (ЛИО5)",
+    "Winicker": "Виникер (ЛИО1)",
+    "Mixer-1": "Линия смешивания 1",
+    "Mixer-2": "Линия смешивания 2",
+    "Musson": "Муссон 2",
+    "BBL-1": "ББЛ 1",
+    "BBL-2": "ББЛ 2",
+    "BBL-3": "ББЛ 3",
+    "IMA C50.1": "ИМА С 50.1",
+    "IMA C50.2": "ИМА С 50.2",
+    "IMA C51": "ИМА С 51",
+    "IMA C21": "ИМА С 21",
+    "IMA C21.2": "ИМА С 21.2",
+    "Consumasz": "Консумаш 1",
+}
+
 # «Основной ВРЦ» из 1С → код линии. Сравниваем после norm_name (латинская C → кириллическая с).
 _LINES_1C = [
     (r"ббл\s*(\d)", lambda m: f"BBL-{m[1]}"),

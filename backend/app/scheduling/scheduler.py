@@ -38,6 +38,7 @@ class Task:
     start: datetime | None = None
     locked: bool = False  # зафиксированы время и линия
     line_locked: bool = False  # зафиксирована только линия, время — автоматически
+    in_progress: bool = False  # этап уже идёт на линии: первым на ней — без переналадки
     # результат
     end: datetime | None = None
     changeover: bool = False
@@ -93,6 +94,12 @@ class _LineState:
         return self.time_of(self.working_idx[pos]), self.time_of(self.working_idx[pos + need - 1] + 1)
 
 
+def _needs_changeover(task: Task, before: str | None) -> bool:
+    if before is None and task.in_progress:
+        return False
+    return before != task.item
+
+
 def _slots_for(task: Task, line: LineSpec, changeover: bool) -> int:
     hours = task.qty / line.per_hour + (CHANGEOVER_HOURS[2] if changeover else 0)
     task.hours = round(hours, 2)
@@ -128,7 +135,7 @@ def schedule(
             continue
         st = state(line)
         pos = st.first_working_at(t.start)
-        changeover = st.item_before(pos) != t.item
+        changeover = _needs_changeover(t, st.item_before(pos))
         need = _slots_for(t, line, changeover)
         if pos + need > len(st.working_idx):
             t.warnings.append(f"Не помещается в горизонт {horizon_days} дней")
@@ -160,7 +167,7 @@ def schedule(
             pos = st.find(need_max, st.first_working_at(start))
             if pos is None:
                 continue
-            changeover = st.item_before(pos) != t.item
+            changeover = _needs_changeover(t, st.item_before(pos))
             need = need_max if changeover else _slots_for(t, line, changeover=False)
             end = st.time_of(st.working_idx[pos + need - 1] + 1)
             if best is None or end < best[0]:

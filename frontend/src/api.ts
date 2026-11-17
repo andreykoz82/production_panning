@@ -218,7 +218,7 @@ export interface ScheduleTask {
 }
 
 export interface Schedule {
-  lines: { code: string; group: string; per_hour: number }[]
+  lines: { code: string; title?: string; group: string; per_hour: number }[]
   tasks: ScheduleTask[]
   off: { line_code: string; start: string; end: string }[]
   load: { line_code: string; week_start: string; available_hours: number; busy_hours: number; load: number | null }[]
