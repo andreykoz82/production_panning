@@ -33,9 +33,11 @@ from app.importers.specs import analog_key
 from app.planning.calendar import add_months, add_workdays, month_end, workdays, workdays_in_month
 from app.reference import warehouses as wh
 from app.reference.lines import NFP_QUARANTINE_WORKDAYS, STAGE2_GROUPS, lines_in_group
+from app.reference.material_kinds import kind_rank
 from app.reference.stm import is_stm
 
 ABC_ORDER = {"A": 0, "B": 1, "C": 2}
+KIND_OTHER = "Прочее"
 MATERIAL_TOLERANCE = 0.10  # нехватка материала до 10 % от потребности — не дефицит
 NFP_ROUND_KG = 100
 STOCKOUT_LOOKAHEAD_MONTHS = 24
@@ -215,6 +217,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
     mats = stock[stock["role"] == wh.MATERIALS]
     mat_pool = _Pool(mats.assign(k=mats["name"].map(analog_key)).groupby("k")["available"].sum().to_dict())
     mat_names: dict[str, str] = {}
+    mat_kinds: dict[str, str | None] = {}  # вид номенклатуры из 1С — для группировки дефицита
 
     specs = data.specs
     spec_by_name = {s: g for s, g in specs.groupby("spec")}
@@ -326,6 +329,8 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
             for m in materials.itertuples(index=False):
                 k = analog_key(m.component)
                 mat_names.setdefault(k, m.component)
+                if mat_kinds.get(k) is None:
+                    mat_kinds[k] = getattr(m, "component_kind", None)
                 per_unit = m.qty_per_1000 / 1000
                 if not row.stm:  # СТМ — прогноз, в дефицит упаковки не входит
                     material_need[k] = material_need.get(k, 0.0) + row.need * per_unit
@@ -385,6 +390,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
         mat_records.append(
             {
                 "material": mat_names[k],
+                "kind": mat_kinds.get(k) or KIND_OTHER,
                 "need": round(q, 3),
                 "available": available,
                 "shortage": 0.0 if within else round(missing, 3),
@@ -398,6 +404,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
         mat_records,
         columns=[
             "material",
+            "kind",
             "need",
             "available",
             "shortage",
@@ -406,8 +413,13 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
             "items",
             "item_names",
         ],
-    ).sort_values(
-        ["shortage", "deviation_pct", "material"], ascending=[False, False, True], ignore_index=True
+    )
+    # группы по виду номенклатуры 1С, внутри — по величине дефицита
+    materials = (
+        materials.assign(_rank=materials["kind"].map(kind_rank))
+        .sort_values(["_rank", "shortage", "deviation_pct", "material"], ascending=[True, False, False, True])
+        .drop(columns="_rank")
+        .reset_index(drop=True)
     )
 
     # --- Дефицит НФП → вход для 1 ступени

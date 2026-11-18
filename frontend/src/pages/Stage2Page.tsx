@@ -26,7 +26,7 @@ import {
   IconPackages,
 } from '@tabler/icons-react'
 
-import { planningApi, type PlanRun, type PlanRunDetail, type Stage2Status } from '../api'
+import { planningApi, type MaterialLine, type PlanRun, type PlanRunDetail, type Stage2Status } from '../api'
 import { PageHeader, Section, StatCard } from '../ui'
 
 const num = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -95,6 +95,18 @@ export default function Stage2Page() {
       (l) => !l.stm && (scope === 'all' || l.need > 0) && (!q || `${l.item} ${l.nfp ?? ''}`.toLowerCase().includes(q)),
     )
   }, [run, scope, search])
+  const [matScope, setMatScope] = useState<'short' | 'all'>('short')
+  const materialGroups = useMemo(() => {
+    if (!run) return [] as [string, MaterialLine[]][]
+    const groups = new Map<string, MaterialLine[]>()
+    for (const m of run.materials) {
+      if (matScope === 'short' && !(m.shortage > 0 || m.within_tolerance)) continue
+      const kind = m.kind ?? 'Прочее'
+      groups.set(kind, [...(groups.get(kind) ?? []), m])
+    }
+    // порядок групп и строк задаёт сервер (вид номенклатуры, затем величина дефицита)
+    return [...groups.entries()]
+  }, [run, matScope])
   const stmLines = useMemo(() => (run ? run.lines.filter((l) => l.stm) : []), [run])
 
   const s = run?.summary
@@ -383,45 +395,85 @@ export default function Stage2Page() {
             </Tabs.Panel>
 
             <Tabs.Panel value="materials" pt="md">
-              <Section p={0}>
-                <Table fz="sm">
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Материал</Table.Th>
-                      <Table.Th ta="right">Нужно</Table.Th>
-                      <Table.Th ta="right">На складе</Table.Th>
-                      <Table.Th ta="right">Дефицит</Table.Th>
-                      <Table.Th ta="right">Не хватает</Table.Th>
-                      <Table.Th>Для каких ГП</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {run.materials
-                      .filter((m) => m.shortage > 0 || m.within_tolerance)
-                      .map((m) => (
-                        <Table.Tr key={m.material} opacity={m.within_tolerance ? 0.75 : 1}>
-                          <Table.Td>
-                            {m.material}
-                            {m.within_tolerance && (
-                              <Badge ml="xs" size="xs" color="gray">
-                                в пределах 10 %
-                              </Badge>
-                            )}
-                          </Table.Td>
-                          <Table.Td ta="right">{kg.format(m.need)}</Table.Td>
-                          <Table.Td ta="right">{kg.format(m.available)}</Table.Td>
-                          <Table.Td ta="right" c={m.shortage > 0 ? 'red' : 'dimmed'} fw={600}>
-                            {m.shortage > 0 ? kg.format(m.shortage) : '—'}
-                          </Table.Td>
-                          <Table.Td ta="right">{m.deviation_pct != null ? `${m.deviation_pct}%` : ''}</Table.Td>
-                          <Table.Td>
-                            <Text size="xs">{m.item_names}</Text>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                  </Table.Tbody>
-                </Table>
-              </Section>
+              <Group mb="sm" justify="space-between">
+                <SegmentedControl
+                  value={matScope}
+                  onChange={(v) => setMatScope(v as 'short' | 'all')}
+                  data={[
+                    { value: 'short', label: 'Дефицит' },
+                    { value: 'all', label: `Все материалы (${run.materials.length})` },
+                  ]}
+                />
+                <Text size="xs" c="dimmed">
+                  Сгруппировано по виду номенклатуры из 1С; нехватка до 10 % — не дефицит
+                </Text>
+              </Group>
+              {materialGroups.length === 0 && <Text c="dimmed">Дефицита материалов нет.</Text>}
+              <Stack gap="md">
+                {materialGroups.map(([kind, items]) => {
+                  const short = items.filter((m) => m.shortage > 0).length
+                  return (
+                    <Section
+                      key={kind}
+                      p={0}
+                      title={
+                        <Group gap="xs" px="md" pt="sm">
+                          <Text fw={650}>{kind}</Text>
+                          <Badge color={short ? 'red' : 'gray'}>
+                            {short ? `дефицит: ${short}` : `${items.length}`}
+                          </Badge>
+                        </Group>
+                      }
+                    >
+                      <Table fz="sm" layout="fixed">
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th w="32%">Материал</Table.Th>
+                            <Table.Th w={110} ta="right">
+                              Нужно
+                            </Table.Th>
+                            <Table.Th w={110} ta="right">
+                              На складе
+                            </Table.Th>
+                            <Table.Th w={110} ta="right">
+                              Дефицит
+                            </Table.Th>
+                            <Table.Th w={100} ta="right">
+                              Не хватает
+                            </Table.Th>
+                            <Table.Th>Для каких ГП</Table.Th>
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {items.map((m) => (
+                            <Table.Tr key={m.material} opacity={m.within_tolerance ? 0.75 : 1}>
+                              <Table.Td>
+                                {m.material}
+                                {m.within_tolerance && (
+                                  <Badge ml="xs" size="xs" color="gray">
+                                    в пределах 10 %
+                                  </Badge>
+                                )}
+                              </Table.Td>
+                              <Table.Td ta="right">{kg.format(m.need)}</Table.Td>
+                              <Table.Td ta="right">{kg.format(m.available)}</Table.Td>
+                              <Table.Td ta="right" c={m.shortage > 0 ? 'red' : 'dimmed'} fw={600}>
+                                {m.shortage > 0 ? kg.format(m.shortage) : '—'}
+                              </Table.Td>
+                              <Table.Td ta="right">{m.deviation_pct ? `${m.deviation_pct}%` : ''}</Table.Td>
+                              <Table.Td>
+                                <Text size="xs" lineClamp={2} title={m.item_names}>
+                                  {m.item_names}
+                                </Text>
+                              </Table.Td>
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                    </Section>
+                  )
+                })}
+              </Stack>
             </Tabs.Panel>
 
             <Tabs.Panel value="nfp" pt="md">

@@ -20,7 +20,16 @@ import pandas as pd
 from app.importers.common import ReportFormatError, clean, find_row, read_raw, to_float
 
 STATUS_ACTIVE = "Действует"
-SPEC_COLUMNS = ["spec", "status", "version", "component", "characteristic", "qty_per_1000", "products"]
+SPEC_COLUMNS = [
+    "spec",
+    "status",
+    "version",
+    "component",
+    "component_kind",
+    "characteristic",
+    "qty_per_1000",
+    "products",
+]
 
 _ANALOG_NOISE = re.compile(r"\((импорт)\)|\bс логотипом\b", re.IGNORECASE)
 
@@ -37,6 +46,8 @@ def parse_specs(path: Path | str) -> pd.DataFrame:
       («Ресурсная спецификация», «….Статус», «….Изделия по рассчитываемой стоимости.Номенклатура»).
       Строки одной версии идут не подряд, поэтому без кода версии («Ресурсная спецификация.Код»)
       версии одного имени объединяются (см. effective_specs).
+    - с 18.11.2026 (14:00): «Номенклатура, Вид номенклатуры» — вид через запятую после имени
+      («Лента отрывная, Упаковочные материалы для производства»).
     """
     raw = read_raw(path)
     head = find_row(
@@ -49,12 +60,13 @@ def parse_specs(path: Path | str) -> pd.DataFrame:
     header = [clean(v) or "" for v in raw.iloc[head]]
     combined = header[0].startswith("Ресурсная спецификация")  # старый формат
     try:
-        c_comp = header.index("Номенклатура")
+        c_comp = next(i for i, h in enumerate(header) if h == "Номенклатура" or h.startswith("Номенклатура,"))
         c_char = header.index("Характеристика")
         c_qty = header.index("Количество упаковок")
         c_spec = 0 if combined else header.index("Ресурсная спецификация")
-    except ValueError as exc:
-        raise ReportFormatError(f"Спецификации: нет колонки {exc}") from exc
+    except (ValueError, StopIteration) as exc:
+        raise ReportFormatError(f"Спецификации: нет колонки {exc or 'Номенклатура'}") from exc
+    with_kind = "вид" in header[c_comp].lower()
     has_status = combined and "Статус" in header[0]
     c_status = (
         None
@@ -76,6 +88,9 @@ def parse_specs(path: Path | str) -> pd.DataFrame:
         component = clean(values[c_comp])
         if not cell or not component:
             continue
+        kind = None
+        if with_kind and ", " in component:
+            component, kind = (part.strip() for part in component.rsplit(", ", 1))
         spec, status = cell, None
         if combined:
             if has_status and ", " in cell:
@@ -97,6 +112,7 @@ def parse_specs(path: Path | str) -> pd.DataFrame:
                 "status": status,
                 "version": version,
                 "component": component,
+                "component_kind": kind,
                 "characteristic": clean(values[c_char]),
                 "qty_per_1000": to_float(values[c_qty]),
                 "product": clean(values[c_prod]) if c_prod is not None else None,
