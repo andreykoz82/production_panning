@@ -184,8 +184,8 @@ def link_stage1_orders(
 ) -> pd.DataFrame:
     """Заказам 1 ступени — НФП и фракция.
 
-    НФП — изделие спецификации этапа (если оно есть в справочнике НФП), иначе по наименованию
-    этапа + «НФП». Фракция — из скобок в наименовании этапа.
+    НФП — изделие спецификации этапа (в написании справочника НФП, если там есть), иначе по
+    наименованию этапа + «НФП». Фракция — из скобок в наименовании этапа.
     """
     chars = {norm_name(c): c for c in characteristics if c}
     by_norm = {norm_name(n): n for n in nfp_catalog}
@@ -196,7 +196,7 @@ def link_stage1_orders(
     for idx in orders.index[orders["stage"] == 1]:
         name = orders.at[idx, "name"]
         base, fraction = stage1_nfp(name, chars)
-        produced = [by_norm[norm_name(p)] for p in products.get(name, []) if norm_name(p) in by_norm]
+        produced = [by_norm.get(norm_name(p), p) for p in products.get(name, [])]
         orders.at[idx, "nfp"] = produced[0] if produced else by_norm.get(norm_name(f"{base} НФП"))
         orders.at[idx, "nfp_characteristic"] = fraction
     return orders

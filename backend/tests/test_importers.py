@@ -215,3 +215,38 @@ def test_item_matched_to_spec_by_output_product(tmp_path):
     items = pd.DataFrame([{"name": "Фп Ромашка цветки 20x1,5г", "printed_material": None}])
     m = match_items_to_specs(items, effective_specs(parse_specs(path))).iloc[0]
     assert (m["spec"], m["method"], m["needs_confirmation"]) == ("Сбор ромашки 20х1,5г", "product", False)
+
+
+def test_specs_new_layout_versions_not_contiguous(tmp_path):
+    """С 18.11.2026: «Номенклатура» первой, имя/статус/изделие — отдельными колонками, строки версий вперемешку."""
+    from app.importers.specs import effective_specs, parse_specs
+
+    header = [
+        "Номенклатура",
+        "Характеристика",
+        "Ресурсная спецификация.Статус",
+        "Ресурсная спецификация.Изделия по рассчитываемой стоимости.Номенклатура",
+        "Ресурсная спецификация",
+        "Количество упаковок",
+    ]
+    s, p = "Фп Ромашка 20x1,5г", "Фп Ромашка 20x1,5г"
+    rows = [
+        ["Ромашка НФП", "КП", "Действует", p, s, 30.5],
+        ["П-8 Ромашка", None, "Действует", p, s, 1020],
+        ["Мята НФП", "КП", "Действует", "Мята 50г", "Мята 50г", 51],
+        ["Ромашка НФП", "КП", "Действует", p, s, 31.25],  # вторая версия
+        ["Лента отрывная (импорт)", None, "Действует", p, s, 255],
+        ["Лента отрывная", None, "Действует", p, s, 250],
+        ["П-8 Ромашка", None, "Действует", p, s, 1020],
+        ["Ромашка НФП", "КП", "Закрыта", p, s, 40],
+    ]
+    path = tmp_path / "specs.xlsx"
+    pd.DataFrame([["Параметры:", *[None] * 5], header, *rows]).to_excel(path, header=False, index=False)
+    specs = parse_specs(path)
+    assert set(specs["version"]) == {0} and specs["products"].notna().all()
+    eff = effective_specs(specs).set_index("component")
+    one = eff[eff["spec"] == s]
+    assert one.loc["Ромашка НФП", "qty_per_1000"] == 31.25  # максимальная норма НФП, «Закрыта» не в счёт
+    assert one.loc["Лента отрывная (импорт)", "qty_per_1000"] == 255
+    assert one.loc["Лента отрывная (импорт)", "analogs"] == "Лента отрывная"
+    assert len(one) == 3 and one["versions_active"].iloc[0] == 2

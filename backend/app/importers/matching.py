@@ -2,7 +2,7 @@
 
 ГП ↔ спецификация ищется по порядку:
 0. изделие, которое выпускается по спецификации (колонка «Изделия … Номенклатура» в отчёте 1С);
-   если ГП выпускают несколько спецификаций — та, чьё имя ближе к имени ГП;
+   если ГП выпускают несколько действующих спецификаций — с тем же именем, иначе с большей нормой НФП;
 1. точное имя;
 2. имя после нормализации (регистр, ®, «20*2.0г» = «20х2,0г», латиница-двойник);
 3. печатный материал (Б-6М, П-8 …) из actual_items, который входит в спецификацию;
@@ -15,7 +15,7 @@ import pandas as pd
 from rapidfuzz import fuzz, process
 
 from app.importers.common import norm_name
-from app.importers.specs import spec_products
+from app.importers.specs import is_nfp_component, spec_products
 
 FUZZY_CUTOFF = 85.0
 MATCH_COLUMNS = ["item", "spec", "method", "score", "needs_confirmation"]
@@ -32,6 +32,10 @@ def match_items_to_specs(items: pd.DataFrame, specs: pd.DataFrame) -> pd.DataFra
     for spec, component in specs[["spec", "component"]].itertuples(index=False):
         specs_by_component.setdefault(norm_name(component), []).append(spec)
     norm_keys = list(by_norm)
+    nfp_norm: dict[str, float] = {}
+    if "qty_per_1000" in specs.columns:
+        nfp_rows = specs[specs["component"].map(is_nfp_component)]
+        nfp_norm = nfp_rows.groupby("spec")["qty_per_1000"].max().to_dict()
     by_product: dict[str, list[str]] = {}
     for spec, products in spec_products(specs).items():
         for p in products:
@@ -43,8 +47,15 @@ def match_items_to_specs(items: pd.DataFrame, specs: pd.DataFrame) -> pd.DataFra
         key = norm_name(name)
         produced_by = by_product.get(key)
         if produced_by:
+            # несколько действующих спецификаций на один ГП: с тем же именем, иначе — с большей нормой НФП
             best = max(
-                sorted(produced_by), key=lambda s: (norm_name(s) == key, fuzz.ratio(key, norm_name(s)))
+                sorted(produced_by),
+                key=lambda s: (
+                    s == name,
+                    norm_name(s) == key,
+                    nfp_norm.get(s, 0.0),
+                    fuzz.ratio(key, norm_name(s)),
+                ),
             )
             rows.append((name, best, "product", 100.0, False))
             continue

@@ -103,6 +103,25 @@ def check_quality(r: ImportResult, today: date) -> list[Issue]:
                 f"НФП не заполнен в actual_items, взят из спецификации: {row.nfp}",
             )
 
+    if "products" in r.specs_effective.columns:
+        produced: dict[str, list[str]] = {}
+        for spec, products in (
+            r.specs_effective[["spec", "products"]].drop_duplicates().itertuples(index=False)
+        ):
+            for p in products.split("; ") if isinstance(products, str) else []:
+                produced.setdefault(p, []).append(spec)
+        chosen = items.set_index("name")["spec"]
+        for name, specs in produced.items():
+            if len(specs) > 1 and name in chosen.index:
+                others = "; ".join(s for s in sorted(specs) if s != chosen[name])
+                add(
+                    "info",
+                    "specs",
+                    name,
+                    f"ГП выпускают {len(specs)} действующие спецификации, взята «{chosen[name]}», "
+                    f"есть ещё: {others}",
+                )
+
     multi = r.specs_effective.groupby("spec")["versions_active"].first()
     multi = multi[multi > 1]
     if len(multi):
