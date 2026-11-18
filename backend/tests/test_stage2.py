@@ -171,10 +171,31 @@ def test_import_analog_counts_as_material():
         items=[{"name": "Мята 50г", "nfp": "Мята НФП", "spec": "Мята 50г"}],
         specs=_spec("Мята 50г") + [("Мята 50г", "Лента отрывная", None, 1.0)],
         plan=[("Мята 50г", date(2026, 12, 1), 10_000)],
-        stock=[_nfp(10_000), _box(100_000), _box(5, "Лента отрывная (импорт)"), _box(4, "Лента отрывная")],
+        stock=[_nfp(10_000), _box(100_000), _box(4, "Лента отрывная (импорт)"), _box(4, "Лента отрывная")],
     )
     r = calculate_stage2(data, Stage2Params(2, CALC)).lines.iloc[0]
-    assert r["feasible"] == 9_000 and r["limit"] == "Лента отрывная"
+    assert r["feasible"] == 8_000 and r["limit"] == "Лента отрывная"
+
+
+def test_material_shortage_within_10_percent_is_not_deficit():
+    data = _data(
+        items=[{"name": "Мята 50г", "nfp": "Мята НФП", "spec": "Мята 50г"}],
+        specs=_spec("Мята 50г") + [("Мята 50г", "Лента отрывная", None, 1.0)],
+        plan=[("Мята 50г", date(2026, 12, 1), 10_000)],
+        stock=[_nfp(10_000), _box(100_000), _box(9, "Лента отрывная")],  # 9 из 10 — 90 %
+    )
+    res = calculate_stage2(data, Stage2Params(2, CALC))
+    r = res.lines.iloc[0]
+    assert r["feasible"] == 10_000 and r["status"] == STATUS_FULL
+    tape = res.materials.set_index("material").loc["Лента отрывная"]
+    assert tape["shortage"] == 0 and tape["within_tolerance"] and tape["deviation_pct"] == 10.0
+    assert res.summary["materials_short"] == 0
+
+
+def test_nfp_task_rounded_to_100_kg():
+    from app.planning.stage2 import round_kg
+
+    assert round_kg(4543.2) == 4500 and round_kg(4550) == 4600 and round_kg(30) == 100 and round_kg(0) == 0
 
 
 def test_enough_stock_needs_nothing():

@@ -9,7 +9,20 @@ import type { Schedule, ScheduleTask } from '../api'
 const HOUR = 3_600_000
 const num = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const WEEKDAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
-const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+const MONTHS = [
+  'январь',
+  'февраль',
+  'март',
+  'апрель',
+  'май',
+  'июнь',
+  'июль',
+  'август',
+  'сентябрь',
+  'октябрь',
+  'ноябрь',
+  'декабрь',
+]
 
 export type Segment = { start: number; end: number }
 
@@ -45,10 +58,12 @@ export function offByLine(data: Schedule): Map<string, Segment[]> {
   return map
 }
 
-export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+export const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 function marks(t: ScheduleTask) {
-  return `${t.status === 'Начат' ? '<span class="mk-started" title="Начат в 1С">▶</span> ' : ''}${t.locked ? '📌 ' : t.line_locked ? '📍 ' : ''}`
+  if (t.status === 'Начат') return '<span class="mk-started" title="Начат в 1С — место зафиксировано">▶</span> '
+  return t.line_locked ? '<span class="mk-pinned" title="Очередь линии задана вручную">📍</span> ' : ''
 }
 
 export function buildGroups(data: Schedule, expanded: Set<string>): TimelineGroup[] {
@@ -107,7 +122,8 @@ export function buildItems(
     if (!t.line_code || !t.start || !t.end) continue
     const segments = workingSegments(new Date(t.start).getTime(), new Date(t.end).getTime(), off.get(t.line_code) ?? [])
     const title = tooltip(t)
-    const state = [t.warnings.length ? 'warn' : '', t.locked ? 'locked' : '', t.status === 'Начат' ? 'started' : '']
+    const started = t.status === 'Начат'
+    const state = [t.warnings.length ? 'warn' : '', started ? 'started' : '', t.line_locked && !started ? 'pinned' : '']
       .filter(Boolean)
       .join(' ')
     const label = shortNumber(t.number).stage
@@ -150,7 +166,8 @@ export function buildItems(
         content: '',
         title,
         className: `seg-task ${state}`,
-        editable: { updateTime: true, updateGroup: false, remove: false },
+        // начатый этап не двигается; остальные — перетаскиванием меняют место в очереди своей линии
+        editable: started ? false : { updateTime: true, updateGroup: false, remove: false },
       })
     })
   }

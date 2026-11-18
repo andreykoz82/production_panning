@@ -49,8 +49,9 @@ class TaskOut(BaseModel):
     end: datetime | None
     hours: float
     changeover: bool
-    locked: bool
     line_locked: bool
+    seq: int | None = None
+    stockout_month: date | None = None
     available_from: date | None
     warnings: list[str]
     status: str | None = None
@@ -62,9 +63,11 @@ class TaskOut(BaseModel):
 
 class TaskPatch(BaseModel):
     line_code: str | None = None
-    start: datetime | None = None
-    locked: bool | None = Field(None, description="Фиксация времени и линии")
-    pin_line: bool | None = Field(None, description="Закрепить только линию")
+    pin_line: bool | None = Field(None, description="Закрепить линию (False — автоматически)")
+
+
+class QueuesIn(BaseModel):
+    queues: dict[str, list[int]] = Field(description="линия → id заказов в порядке очереди (без начатых)")
 
 
 class WarehouseIn(BaseModel):
@@ -87,6 +90,15 @@ def _guard(fn, *args):
 @router.get("/api/calendars")
 def get_month(session: SessionDep, month: Annotated[str, Query(description="ГГГГ-ММ")]):
     return svc.month_grid(session, _month(month))
+
+
+@router.get("/api/calendars/capacity")
+def get_capacity(
+    session: SessionDep,
+    month: Annotated[str, Query(description="первый месяц, ГГГГ-ММ")],
+    months: Annotated[int, Query(ge=1, le=12)] = 3,
+):
+    return svc.capacity(session, _month(month), months)
 
 
 @router.put("/api/calendars/template")
@@ -138,7 +150,19 @@ def get_schedule(
 
 @router.patch("/api/schedule/tasks/{task_id}")
 def patch_task(task_id: int, body: TaskPatch, session: SessionDep):
-    _guard(svc.move_task, session, task_id, body.line_code, body.start, body.locked, body.pin_line)
+    _guard(svc.move_task, session, task_id, body.line_code, body.pin_line)
+    return {"ok": True}
+
+
+@router.put("/api/schedule/queues")
+def put_queues(body: QueuesIn, session: SessionDep):
+    _guard(svc.set_queues, session, body.queues)
+    return {"ok": True}
+
+
+@router.delete("/api/schedule/queues/{line_code}")
+def delete_queue(line_code: str, session: SessionDep):
+    _guard(svc.reset_queue, session, line_code)
     return {"ok": True}
 
 

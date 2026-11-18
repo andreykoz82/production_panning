@@ -10,7 +10,9 @@
    и «Фасовка = Да». Покупной НФП (есть только на складе лексырья) — по наименованию.
    НФП на карантине доступен через 5 рабочих дней и в «можно выпустить сейчас» не входит.
 5. Материалы — по действующей спецификации; аналоги (обычный / импорт) суммируются.
+   Отклонение до 10 % (на складе ≥ 90 % потребности) дефицитом не считается (17.11.2026).
 6. НФП и общие материалы распределяются по позициям в порядке приоритета.
+7. Задание 1 ступени по НФП округляется до 100 кг (17.11.2026).
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ from app.reference import warehouses as wh
 from app.reference.lines import NFP_QUARANTINE_WORKDAYS, STAGE2_GROUPS, lines_in_group
 
 ABC_ORDER = {"A": 0, "B": 1, "C": 2}
+MATERIAL_TOLERANCE = 0.10  # нехватка материала до 10 % от потребности — не дефицит
+NFP_ROUND_KG = 100
 STOCKOUT_LOOKAHEAD_MONTHS = 24
 
 STATUS_NOT_NEEDED = "Не требуется"
@@ -229,6 +233,19 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
     nfp_by_key: dict[tuple, dict] = {}
     nfp_initial = dict(nfp_pool.left)
 
+    # допуск по материалам: если на складе не меньше 90 % общей потребности, считаем, что хватает
+    total_mat_need: dict[str, float] = {}
+    for row in lines.itertuples(index=False):
+        spec = spec_by_name.get(row.spec)
+        if row.need <= 0 or spec is None or not row.nfp or row.line_group not in STAGE2_GROUPS:
+            continue
+        for m in spec[(spec["component"] != row.nfp) & (spec["qty_per_1000"] > 0)].itertuples(index=False):
+            k = analog_key(m.component)
+            total_mat_need[k] = total_mat_need.get(k, 0.0) + row.need * m.qty_per_1000 / 1000
+    for k, q in total_mat_need.items():
+        if (1 - MATERIAL_TOLERANCE) * q <= mat_pool.get(k) < q:
+            mat_pool.left[k] = q
+
     for row in lines.itertuples(index=False):
         spec = spec_by_name.get(row.spec)
         res = {k: None for k in out_cols}
@@ -310,20 +327,38 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
 
     # --- Сводка по материалам
     mat_available = mats.assign(k=mats["name"].map(analog_key)).groupby("k")["available"].sum()
-    materials = pd.DataFrame(
-        [
+    mat_records = []
+    for k, q in material_need.items():
+        available = float(mat_available.get(k, 0.0))
+        missing = max(q - available, 0.0)
+        within = missing > 0 and available >= (1 - MATERIAL_TOLERANCE) * q
+        mat_records.append(
             {
                 "material": mat_names[k],
                 "need": round(q, 3),
-                "available": float(mat_available.get(k, 0.0)),
-                "shortage": round(max(q - float(mat_available.get(k, 0.0)), 0.0), 3),
+                "available": available,
+                "shortage": 0.0 if within else round(missing, 3),
+                "deviation_pct": round(missing / q * 100, 1) if q and missing else 0.0,
+                "within_tolerance": within,
                 "items": len(material_items[k]),
                 "item_names": "; ".join(sorted(material_items[k])),
             }
-            for k, q in material_need.items()
+        )
+    materials = pd.DataFrame(
+        mat_records,
+        columns=[
+            "material",
+            "need",
+            "available",
+            "shortage",
+            "deviation_pct",
+            "within_tolerance",
+            "items",
+            "item_names",
         ],
-        columns=["material", "need", "available", "shortage", "items", "item_names"],
-    ).sort_values(["shortage", "material"], ascending=[False, True], ignore_index=True)
+    ).sort_values(
+        ["shortage", "deviation_pct", "material"], ascending=[False, False, True], ignore_index=True
+    )
 
     # --- Дефицит НФП → вход для 1 ступени
     nfp_records = []
@@ -347,6 +382,9 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
             }
         )
     _apply_stage1_orders(nfp_records, data.orders)
+    for r in nfp_records:  # задание 1 ступени — круглыми цифрами
+        r["shortage_kg"] = round_kg(r["shortage_kg"])
+        r["uncovered_kg"] = round_kg(r["uncovered_kg"])
     nfp = pd.DataFrame(
         nfp_records,
         columns=[
@@ -398,3 +436,10 @@ def _apply_stage1_orders(records: list[dict], orders: pd.DataFrame) -> None:
             left[key] -= take
             r["stage1_orders_kg"] = round(take, 2)
             r["uncovered_kg"] = round(r["shortage_kg"] - take, 2)
+
+
+def round_kg(kg: float, step: int = NFP_ROUND_KG) -> float:
+    """До ближайших 100 кг (4 543,2 → 4 500); ненулевой дефицит — не меньше 100 кг."""
+    if kg <= 0:
+        return 0.0
+    return float(max(step, math.floor(kg / step + 0.5) * step))

@@ -175,8 +175,9 @@ class ScheduleTask(Base):
     end: Mapped[datetime | None] = mapped_column(DateTime)
     hours: Mapped[float] = mapped_column(Float, default=0)
     changeover: Mapped[bool] = mapped_column(Boolean, default=False)
-    locked: Mapped[bool] = mapped_column(Boolean, default=False)  # время и линия зафиксированы
-    line_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # только линия
+    line_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # линия закреплена
+    seq: Mapped[int | None] = mapped_column(Integer)  # место в ручной очереди линии
+    stockout_month: Mapped[date | None] = mapped_column(Date)  # когда кончится запас ГП (из расчёта)
     status: Mapped[str | None] = mapped_column(String(50))  # статус этапа в 1С
     line_1c: Mapped[str | None] = mapped_column(String(100))  # линия, назначенная в 1С
     started_at: Mapped[datetime | None] = mapped_column(DateTime)  # фактическое начало этапа в 1С

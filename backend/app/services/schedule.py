@@ -20,7 +20,7 @@ from app.reference.lines import (
     STAGE2_GROUPS,
 )
 from app.scheduling.calendars import LineCalendar, validate
-from app.scheduling.scheduler import DEFAULT_HORIZON_DAYS, Task, schedule, week_load
+from app.scheduling.scheduler import DEFAULT_HORIZON_DAYS, Task, schedule
 from app.services.planning import load_planning_data
 
 STAGE2_LINES = [line.code for line in LINES if line.stage == 2]
@@ -92,6 +92,7 @@ def month_grid(session: Session, month: date) -> dict:
         lines.append(
             {
                 "line_code": line.code,
+                "title": LINE_TITLES.get(line.code, line.code),
                 "stage": line.stage,
                 "group": line.group,
                 "mode": cal.mode,
@@ -110,6 +111,67 @@ def month_grid(session: Session, month: date) -> dict:
             }
         )
     return {"month": first, "days": [{"day": x, "workday": is_workday(x)} for x in days], "lines": lines}
+
+
+def capacity(session: Session, first_month: date, months: int = 3, today: date | None = None) -> dict:
+    """Сколько выпустят группы линий при текущих календарях: по месяцам и итого.
+
+    Текущий месяц — с сегодняшнего дня. Для 2 ступени рядом — что предстоит выпустить:
+    потребность к фасовке из последнего расчёта (на его горизонт) + остаток открытых этапов.
+    """
+    today = today or date.today()
+    cals = load_calendars(session)
+    run = latest_stage2_run(session)
+    need_by_group: dict[str, float] = {}
+    for r in run.lines if run else []:
+        need_by_group[r.get("line_group")] = need_by_group.get(r.get("line_group"), 0.0) + (
+            r.get("need") or 0.0
+        )
+    orders_by_group: dict[str, float] = {}
+    for t in session.scalars(select(models.ScheduleTask).where(models.ScheduleTask.stage == 2)):
+        orders_by_group[t.line_group] = orders_by_group.get(t.line_group, 0.0) + t.qty
+
+    month_starts = []
+    m = first_month.replace(day=1)
+    for _ in range(months):
+        month_starts.append(m)
+        m = (m + timedelta(days=32)).replace(day=1)
+
+    groups: dict[str, dict] = {}
+    for line in LINES:
+        g = groups.setdefault(
+            line.group,
+            {
+                "group": line.group,
+                "stage": line.stage,
+                "unit": "шт" if line.stage == 2 else "кг",
+                "lines": [],
+                "months": [{"month": ms, "hours": 0.0, "output": 0.0} for ms in month_starts],
+                "need": round(need_by_group[line.group]) if line.group in need_by_group else None,
+                "open_orders": round(orders_by_group.get(line.group, 0.0)) if line.stage == 2 else None,
+            },
+        )
+        g["lines"].append(LINE_TITLES.get(line.code, line.code))
+        cal = cals[line.code]
+        for cell, ms in zip(g["months"], month_starts, strict=True):
+            d = max(ms, today)
+            hours = 0
+            while d.month == ms.month:
+                hours += cal.hours_on(d)
+                d += timedelta(days=1)
+            cell["hours"] += hours
+            cell["output"] += hours * line.per_hour
+    for g in groups.values():
+        for cell in g["months"]:
+            cell["output"] = round(cell["output"])
+        g["total_hours"] = sum(c["hours"] for c in g["months"])
+        g["total"] = sum(c["output"] for c in g["months"])
+    return {
+        "months": month_starts,
+        "from": max(first_month.replace(day=1), today),
+        "horizon_months": run.params.get("horizon_months") if run else None,
+        "groups": list(groups.values()),
+    }
 
 
 def _check_line(code: str) -> None:
@@ -175,8 +237,9 @@ def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
             changed = (task.qty, task.item, task.status, task.qty_done) != (o.qty, item, o.status, o.qty_done)
             updated += changed
             # этап начат в 1С — закрепляем его линию, если планировщик ничего не закреплял вручную
-            if started and task.status != STARTED and line_1c and not (task.locked or task.line_locked):
-                task.line_code, task.line_locked = line_1c, True
+            # этап начат в 1С — его линия из 1С, место в очереди больше не меняется
+            if started and task.status != STARTED and line_1c:
+                task.line_code, task.line_locked, task.seq = line_1c, True, None
         task.qty, task.item, task.line_group = o.qty, item, group
         task.status, task.line_1c, task.started_at = o.status, o.line_1c, o.started_at
         task.qty_plan, task.qty_done = o.qty_plan, o.qty_done
@@ -283,8 +346,8 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
                 priority=started_rank.get(db.number, r.get("priority", math.inf)),
                 line_code=db.line_code,
                 start=db.start,
-                locked=db.locked,
                 line_locked=db.line_locked,
+                seq=None if db.number in started_rank else db.seq,
                 in_progress=db.number in started_rank,
             )
         )
@@ -307,7 +370,9 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
     for db in db_tasks:
         t = by_key[db.number]
         db.line_code, db.start, db.end = t.line_code, t.start, t.end
-        db.hours, db.changeover, db.locked, db.line_locked = t.hours, t.changeover, t.locked, t.line_locked
+        db.hours, db.changeover, db.line_locked = t.hours, t.changeover, t.line_locked
+        stockout = run_lines.get(t.item, {}).get("stockout_month")
+        db.stockout_month = date.fromisoformat(stockout) if stockout else None
         db.available_from = t.end.date() + timedelta(days=GP_CERTIFICATION_DAYS) if t.end else None
         db.warnings = t.warnings
     session.commit()
@@ -319,37 +384,75 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
     }
 
 
-def move_task(
-    session: Session,
-    task_id: int,
-    line_code: str | None,
-    start: datetime | None,
-    locked: bool | None,
-    pin_line: bool | None = None,
-    now: datetime | None = None,
-) -> None:
-    """Ручная правка заказа.
+def _editable(task: models.ScheduleTask) -> None:
+    if task.status == STARTED:
+        raise ValueError(f"Этап {task.number} начат в 1С — его линия и место в очереди не меняются")
 
-    - перетаскивание (start, line_code) — фиксирует время и линию;
-    - выбор линии (line_code + pin_line=True) — закрепляет только линию, время считается автоматически;
-    - pin_line=False — снять закрепление линии; locked=False — снять фиксацию времени.
-    """
+
+def move_task(session: Session, task_id: int, line_code: str | None, pin_line: bool | None, now=None) -> None:
+    """Выбор линии у заказа: line_code + pin_line=True закрепляет линию (в конец её очереди),
+    pin_line=False возвращает заказ на автоматическую расстановку."""
     task = session.get(models.ScheduleTask, task_id)
     if task is None:
         raise LookupError("Заказ не найден")
+    _editable(task)
     if line_code is not None:
-        line = next((ln for ln in LINES if ln.code == line_code), None)
-        if line is None or line.group != task.line_group:
-            raise ValueError(f"Заказ {task.number} можно ставить только на линии группы «{task.line_group}»")
+        _check_group(task, line_code)
+        if line_code != task.line_code:
+            task.seq = None
         task.line_code = line_code
-    if start is not None:
-        task.start = start
     if pin_line is not None:
         task.line_locked = pin_line
-    if locked is not None:
-        task.locked = locked
-    elif start is not None:
-        task.locked = True  # перетащили вручную — фиксируем время и линию
+        if not pin_line:
+            task.seq = None
+    session.commit()
+    replan(session, now)
+
+
+def _check_group(task: models.ScheduleTask, line_code: str) -> None:
+    line = LINE_BY_CODE.get(line_code)
+    if line is None or line.group != task.line_group:
+        raise ValueError(f"Заказ {task.number} можно ставить только на линии группы «{task.line_group}»")
+
+
+def set_queues(session: Session, queues: dict[str, list[int]], now=None) -> None:
+    """Ручная очередь: для каждой переданной линии — заказы в нужном порядке (без начатых).
+
+    Заказы закрепляются за линией и получают место в очереди. Заказы, которые раньше стояли
+    в очереди этой линии, но в списке их нет, возвращаются на автоматическую расстановку.
+    """
+    seen: set[int] = set()
+    for line_code, ids in queues.items():
+        if line_code not in LINE_BY_CODE:
+            raise ValueError(f"Неизвестная линия {line_code}")
+        for i, task_id in enumerate(ids):
+            task = session.get(models.ScheduleTask, task_id)
+            if task is None:
+                raise LookupError(f"Заказ {task_id} не найден")
+            if task_id in seen:
+                raise ValueError(f"Заказ {task.number} указан в нескольких очередях")
+            seen.add(task_id)
+            _editable(task)
+            _check_group(task, line_code)
+            task.line_code, task.line_locked, task.seq = line_code, True, i
+    stale = session.scalars(
+        select(models.ScheduleTask).where(
+            models.ScheduleTask.line_code.in_(list(queues)), models.ScheduleTask.seq.is_not(None)
+        )
+    ).all()
+    for task in stale:
+        if task.id not in seen:
+            task.seq, task.line_locked = None, False
+    session.commit()
+    replan(session, now)
+
+
+def reset_queue(session: Session, line_code: str, now=None) -> None:
+    """Вернуть все незапущенные заказы линии на автоматическую расстановку."""
+    tasks = session.scalars(select(models.ScheduleTask).where(models.ScheduleTask.line_code == line_code))
+    for task in tasks:
+        if task.status != STARTED:
+            task.seq, task.line_locked = None, False
     session.commit()
     replan(session, now)
 
@@ -415,20 +518,6 @@ def timeline(session: Session, date_from: date, date_to: date) -> dict:
         end = datetime.combine(date_to + timedelta(days=1), datetime.min.time())
         if end > cursor:
             off.append({"line_code": code, "start": cursor, "end": end})
-    sched = [
-        Task(
-            key=t.number,
-            item=t.item,
-            qty=t.qty,
-            group=t.line_group or "",
-            line_code=t.line_code,
-            start=t.start,
-            locked=t.locked,
-            end=t.end,
-        )
-        for t in db_tasks
-    ]
-    weeks = max(1, ((date_to - date_from).days // 7) + 1)
     return {
         "lines": [
             {
@@ -442,5 +531,4 @@ def timeline(session: Session, date_from: date, date_to: date) -> dict:
         ],
         "tasks": db_tasks,
         "off": off,
-        "load": week_load(sched, cals, STAGE2_LINES, date_from, weeks),
     }

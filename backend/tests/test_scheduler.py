@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from app.scheduling.calendars import MODE_24_7, LineCalendar
-from app.scheduling.scheduler import Task, schedule, week_load
+from app.scheduling.scheduler import Task, schedule
 
 START = datetime(2026, 11, 17, 9, 0)  # вторник
 BBL_SHIFT = 17283  # норма BBL за смену = 8 ч работы
@@ -44,15 +44,18 @@ def test_only_lines_of_own_group_and_earliest_finish():
     assert fp.line_code in {"IMA C50.1", "IMA C50.2", "IMA C51"}
 
 
-def test_locked_task_stays_and_others_go_around():
-    locked = Task(
-        "КЛ1", "Мята", 2000, "Линия ББЛ", line_code="BBL-1", start=datetime(2026, 11, 17, 10), locked=True
-    )
-    other = Task("КЛ2", "Аир", BBL_SHIFT, "Линия ББЛ", priority=1)
+def test_started_first_then_manual_queue_then_auto():
     cals = {"BBL-2": LineCalendar(shifts=0), "BBL-3": LineCalendar(shifts=0)}
-    schedule([locked, other], cals, START)
-    assert locked.start == datetime(2026, 11, 17, 10) and locked.line_code == "BBL-1"
-    assert other.start >= locked.end  # не влезает в окно 09–10, идёт после
+    q2 = Task("КЛ2", "Б", 2000, "Линия ББЛ", line_code="BBL-1", line_locked=True, seq=1)
+    q1 = Task("КЛ1", "А", 2000, "Линия ББЛ", line_code="BBL-1", line_locked=True, seq=0)
+    auto = Task("КЛ0", "В", 2000, "Линия ББЛ", priority=0)  # самый срочный, но без очереди
+    running = Task(
+        "КЛ9", "Г", 2000, "Линия ББЛ", priority=-1, line_code="BBL-1", line_locked=True, in_progress=True
+    )
+    schedule([q2, auto, q1, running], cals, START)
+    order = [t.key for t in sorted([q2, auto, q1, running], key=lambda t: t.start)]
+    assert order == ["КЛ9", "КЛ1", "КЛ2", "КЛ0"]
+    assert running.start == START and not running.changeover
 
 
 def test_weekend_override_used():
@@ -70,17 +73,10 @@ def test_no_capacity_gives_warning():
     assert t.end is None and "Не помещается" in t.warnings[0]
 
 
-def test_week_load():
-    t = Task("КЛ1", "Мята", BBL_SHIFT, "Линия ББЛ", line_code="BBL-1")
-    schedule([t], {"BBL-2": LineCalendar(shifts=0), "BBL-3": LineCalendar(shifts=0)}, START)
-    row = week_load([t], {}, ["BBL-1"], date(2026, 11, 16), 1)[0]
-    assert row["available_hours"] == 40 and row["busy_hours"] == 9
-
-
 def test_pinned_line_with_automatic_time():
     t = Task("КЛ1", "Мята", 2000, "Линия ББЛ", line_code="BBL-3", line_locked=True)
     schedule([t], {}, START)
-    assert t.line_code == "BBL-3" and t.start == START and not t.locked
+    assert t.line_code == "BBL-3" and t.start == START
 
 
 def test_in_progress_task_first_on_line_has_no_changeover():
