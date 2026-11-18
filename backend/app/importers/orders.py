@@ -177,16 +177,26 @@ def stage1_nfp(name: str, characteristics: dict[str, str]) -> tuple[str, str | N
 
 
 def link_stage1_orders(
-    orders: pd.DataFrame, nfp_catalog: list[str], characteristics: list[str]
+    orders: pd.DataFrame,
+    nfp_catalog: list[str],
+    characteristics: list[str],
+    products: dict[str, list[str]] | None = None,
 ) -> pd.DataFrame:
-    """Заказам 1 ступени — НФП из справочника (по наименованию + «НФП») и фракция."""
+    """Заказам 1 ступени — НФП и фракция.
+
+    НФП — изделие спецификации этапа (если оно есть в справочнике НФП), иначе по наименованию
+    этапа + «НФП». Фракция — из скобок в наименовании этапа.
+    """
     chars = {norm_name(c): c for c in characteristics if c}
     by_norm = {norm_name(n): n for n in nfp_catalog}
+    products = products or {}
     orders = orders.copy()
     orders["nfp"] = None
     orders["nfp_characteristic"] = None
     for idx in orders.index[orders["stage"] == 1]:
-        base, fraction = stage1_nfp(orders.at[idx, "name"], chars)
-        orders.at[idx, "nfp"] = by_norm.get(norm_name(f"{base} НФП"))
+        name = orders.at[idx, "name"]
+        base, fraction = stage1_nfp(name, chars)
+        produced = [by_norm[norm_name(p)] for p in products.get(name, []) if norm_name(p) in by_norm]
+        orders.at[idx, "nfp"] = produced[0] if produced else by_norm.get(norm_name(f"{base} НФП"))
         orders.at[idx, "nfp_characteristic"] = fraction
     return orders

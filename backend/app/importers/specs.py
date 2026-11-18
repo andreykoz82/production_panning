@@ -5,6 +5,11 @@
 Одна спецификация может выгружаться несколькими версиями — подряд идущими блоками строк.
 Правило (16.11.2026): берём только «Действует»; если действующих версий несколько,
 берём версию с максимальной нормой НФП. Материалы-аналоги из других версий взаимозаменяемы.
+
+С 18.11.2026 в отчёт добавлена колонка «Ресурсная спецификация.Изделия по рассчитываемой стоимости.
+Номенклатура» — что выпускается по спецификации (ГП или НФП). По ней ГП сопоставляется
+со спецификацией надёжнее, чем по похожему имени. Если у спецификации несколько изделий,
+1С повторяет строки материалов для каждого — оставляем один набор, изделия собираем в список.
 """
 
 import re
@@ -15,7 +20,7 @@ import pandas as pd
 from app.importers.common import ReportFormatError, clean, find_row, read_raw, to_float
 
 STATUS_ACTIVE = "Действует"
-SPEC_COLUMNS = ["spec", "status", "version", "component", "characteristic", "qty_per_1000"]
+SPEC_COLUMNS = ["spec", "status", "version", "component", "characteristic", "qty_per_1000", "products"]
 
 _ANALOG_NOISE = re.compile(r"\((импорт)\)|\bс логотипом\b", re.IGNORECASE)
 
@@ -33,6 +38,10 @@ def parse_specs(path: Path | str) -> pd.DataFrame:
         c_qty = header.index("Количество упаковок")
     except ValueError as exc:
         raise ReportFormatError(f"Спецификации: нет колонки {exc}") from exc
+    # «Ресурсная спецификация.Изделия по рассчитываемой стоимости.Номенклатура» — выходное изделие
+    c_prod = next(
+        (i for i, h in enumerate(header) if h and "издели" in h.lower() and "номенклатур" in h.lower()), None
+    )
 
     rows = []
     versions: dict[str, int] = {}
@@ -56,9 +65,38 @@ def parse_specs(path: Path | str) -> pd.DataFrame:
                 "component": component,
                 "characteristic": clean(values[c_char]),
                 "qty_per_1000": to_float(values[c_qty]),
+                "product": clean(values[c_prod]) if c_prod is not None else None,
             }
         )
-    return pd.DataFrame(rows, columns=SPEC_COLUMNS)
+    df = pd.DataFrame(rows, columns=[*SPEC_COLUMNS[:-1], "product"])
+    return _collapse_products(df)
+
+
+def _collapse_products(df: pd.DataFrame) -> pd.DataFrame:
+    """Изделия версии — списком в колонке products; повтор материалов по изделиям убираем."""
+    if df.empty or df["product"].isna().all():
+        return df.drop(columns="product").assign(products=None)[SPEC_COLUMNS]
+    parts = []
+    for _, block in df.groupby(["spec", "version"], sort=False):
+        products = list(dict.fromkeys(block["product"].dropna()))
+        if len(products) > 1:
+            # 1С повторяет материалы для каждого изделия — берём строки первого
+            block = block[block["product"].isna() | (block["product"] == products[0])]
+        parts.append(block.assign(products="; ".join(products) or None))
+    return pd.concat(parts, ignore_index=True).drop(columns="product")[SPEC_COLUMNS]
+
+
+def spec_products(specs: pd.DataFrame) -> dict[str, list[str]]:
+    """Спецификация → выпускаемые изделия (из колонки «Изделия … Номенклатура»)."""
+    out: dict[str, list[str]] = {}
+    if "products" not in specs.columns:
+        return out
+    for spec, products in specs[["spec", "products"]].drop_duplicates().itertuples(index=False):
+        if isinstance(products, str) and products:
+            for p in products.split("; "):
+                if p not in out.setdefault(spec, []):
+                    out[spec].append(p)
+    return out
 
 
 def is_nfp_component(name: str) -> bool:

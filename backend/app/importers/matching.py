@@ -1,6 +1,8 @@
 """Сопоставление наименований между отчётами 1С.
 
 ГП ↔ спецификация ищется по порядку:
+0. изделие, которое выпускается по спецификации (колонка «Изделия … Номенклатура» в отчёте 1С);
+   если ГП выпускают несколько спецификаций — та, чьё имя ближе к имени ГП;
 1. точное имя;
 2. имя после нормализации (регистр, ®, «20*2.0г» = «20х2,0г», латиница-двойник);
 3. печатный материал (Б-6М, П-8 …) из actual_items, который входит в спецификацию;
@@ -13,6 +15,7 @@ import pandas as pd
 from rapidfuzz import fuzz, process
 
 from app.importers.common import norm_name
+from app.importers.specs import spec_products
 
 FUZZY_CUTOFF = 85.0
 MATCH_COLUMNS = ["item", "spec", "method", "score", "needs_confirmation"]
@@ -29,11 +32,22 @@ def match_items_to_specs(items: pd.DataFrame, specs: pd.DataFrame) -> pd.DataFra
     for spec, component in specs[["spec", "component"]].itertuples(index=False):
         specs_by_component.setdefault(norm_name(component), []).append(spec)
     norm_keys = list(by_norm)
+    by_product: dict[str, list[str]] = {}
+    for spec, products in spec_products(specs).items():
+        for p in products:
+            by_product.setdefault(norm_name(p), []).append(spec)
 
     rows = []
     for item in items.itertuples(index=False):
         name = item.name
         key = norm_name(name)
+        produced_by = by_product.get(key)
+        if produced_by:
+            best = max(
+                sorted(produced_by), key=lambda s: (norm_name(s) == key, fuzz.ratio(key, norm_name(s)))
+            )
+            rows.append((name, best, "product", 100.0, False))
+            continue
         if name in exact:
             rows.append((name, name, "exact", 100.0, False))
             continue
