@@ -115,3 +115,30 @@ def test_line_from_1c():
     assert line_from_1c("Линия смешивания 2") == "Mixer-2"
     assert line_from_1c("Муссон 2") == "Musson"
     assert line_from_1c("Неизвестный ВРЦ") is None
+
+
+def test_items_optional_series_and_stm_columns(tmp_path):
+    from app.importers.items import COLUMNS, parse_items
+
+    base = {c: None for c in COLUMNS}
+    rows = [
+        {
+            **base,
+            "Наименование": "Мята 50г",
+            "Группа": "a",
+            "Масса": 50,
+            "min": 5000,
+            "max": "50 000",
+            "СТМ": "нет",
+        },
+        {**base, "Наименование": 'Фиточай "Укроп" (ТМ "Будь здоров!") 50г', "СТМ": None},
+        {**base, "Наименование": "Чай клиента 20х1,5г", "СТМ": "да"},
+    ]
+    path = tmp_path / "actual_items.xlsx"
+    pd.DataFrame(rows).to_excel(path, index=False)
+    items = parse_items(path).set_index("name")
+    assert items.loc["Мята 50г", "min_series"] == 5000 and items.loc["Мята 50г", "max_series"] == 50000
+    assert not items.loc["Мята 50г", "stm"]
+    assert items.loc['Фиточай "Укроп" (ТМ "Будь здоров!") 50г', "stm"]  # пусто — по наименованию
+    assert items.loc["Чай клиента 20х1,5г", "stm"]
+    assert pd.isna(items.loc["Чай клиента 20х1,5г", "min_series"])

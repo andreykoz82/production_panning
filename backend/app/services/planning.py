@@ -26,7 +26,18 @@ def load_planning_data(session: Session, snapshot_id: int, with_reserve: bool = 
         session,
         models.Item,
         snapshot_id,
-        ["name", "abc", "line_group", "nfp", "purpose", "in_scope", "spec"],
+        [
+            "name",
+            "abc",
+            "line_group",
+            "nfp",
+            "purpose",
+            "in_scope",
+            "spec",
+            "min_series",
+            "max_series",
+            "stm",
+        ],
     )
     stock_cols = ["warehouse", "name", "item", "characteristic", "purpose", "packing_allowed", "available"]
     stock_cols += ["is_defect"] + (["reserved"] if with_reserve else [])

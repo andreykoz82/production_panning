@@ -7,7 +7,6 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
-from app.reference.stm import is_stm
 
 
 class ImportSnapshot(Base):
@@ -48,6 +47,9 @@ class Item(_SnapshotRow, Base):
     spec_method: Mapped[str | None] = mapped_column(String(30))
     spec_score: Mapped[float] = mapped_column(Float, default=0)
     spec_needs_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
+    min_series: Mapped[float | None] = mapped_column(Float)  # минимальная серия, шт
+    max_series: Mapped[float | None] = mapped_column(Float)  # максимальная серия, шт
+    stm: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # СТМ — по письму клиента
 
 
 class StockRow(_SnapshotRow, Base):
@@ -179,6 +181,7 @@ class ScheduleTask(Base):
     line_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # линия закреплена
     seq: Mapped[int | None] = mapped_column(Integer)  # место в ручной очереди линии
     stockout_month: Mapped[date | None] = mapped_column(Date)  # когда кончится запас ГП (из расчёта)
+    stm: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # СТМ — по письму клиента
     status: Mapped[str | None] = mapped_column(String(50))  # статус этапа в 1С
     line_1c: Mapped[str | None] = mapped_column(String(100))  # линия, назначенная в 1С
     started_at: Mapped[datetime | None] = mapped_column(DateTime)  # фактическое начало этапа в 1С
@@ -187,11 +190,6 @@ class ScheduleTask(Base):
     available_from: Mapped[date | None] = mapped_column(Date)
     warnings: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    @property
-    def stm(self) -> bool:
-        """СТМ — заказ поставлен по письму клиента."""
-        return is_stm(self.item)
 
 
 class WarehouseRole(Base):

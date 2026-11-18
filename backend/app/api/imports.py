@@ -49,6 +49,10 @@ class ItemOut(BaseModel):
     spec_method: str | None
     spec_score: float
     spec_needs_confirmation: bool
+    kind: str | None = None
+    min_series: float | None = None
+    max_series: float | None = None
+    stm: bool = False
 
 
 def _run_import(session: Session, folder: Path, source: str) -> models.ImportSnapshot:

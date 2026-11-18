@@ -37,6 +37,14 @@ def _months_ahead(today: date, n: int) -> tuple[date, date]:
     return start, date(start.year + year, month + 1, 1)
 
 
+def _n(v: float) -> str:
+    return f"{v:,.0f}".replace(",", "\u00a0")
+
+
+def _empty(v) -> bool:
+    return v is None or v != v  # None или NaN
+
+
 def check_quality(r: ImportResult, today: date) -> list[Issue]:
     issues: list[Issue] = []
     add = lambda *a: issues.append(Issue(*a))  # noqa: E731
@@ -46,7 +54,29 @@ def check_quality(r: ImportResult, today: date) -> list[Issue]:
     # --- Справочник ГП и спецификации
     for row in items[~items["in_scope"]].itertuples():
         add("info", "items", row.name, f"Не планируется: {row.line_group}")
+    has_series = "min_series" in items.columns and items[["min_series", "max_series"]].notna().any().any()
+    if not has_series:
+        add(
+            "warning",
+            "items",
+            None,
+            "В actual_items нет минимальной/максимальной серии — учитывается только партия 1 ч",
+        )
     for row in scope.itertuples():
+        if has_series and row.kind == "ЛС" and (_empty(row.min_series) or _empty(row.max_series)):
+            add("warning", "items", row.name, "Лекарственный продукт без минимальной или максимальной серии")
+        if (
+            has_series
+            and not _empty(row.min_series)
+            and not _empty(row.max_series)
+            and row.min_series > row.max_series
+        ):
+            add(
+                "error",
+                "items",
+                row.name,
+                f"Минимальная серия {_n(row.min_series)} больше максимальной {_n(row.max_series)}",
+            )
         if row.line_group not in STAGE2_GROUPS:
             add("error", "items", row.name, f"Неизвестная группа линий «{row.line_group}»")
         if row.spec is None or row.spec != row.spec:  # None или NaN
@@ -155,6 +185,24 @@ def check_quality(r: ImportResult, today: date) -> list[Issue]:
         unknown = all_orders[all_orders["line_1c"].notna() & all_orders["line_code"].isna()]
         for line in sorted(unknown["line_1c"].unique()):
             add("warning", "orders", None, f"Линия 1С «{line}» не сопоставлена с линиями приложения")
+        if has_series:
+            limits = scope.set_index("name")[["min_series", "max_series"]]
+            for row in orders[orders["item"].isin(limits.index)].itertuples():
+                lo, hi = limits.loc[row.item, "min_series"], limits.loc[row.item, "max_series"]
+                if not _empty(hi) and row.qty_plan > hi:
+                    add(
+                        "info",
+                        "orders",
+                        row.item,
+                        f"Заказ {row.number}: {_n(row.qty_plan)} шт больше максимальной серии {_n(hi)}",
+                    )
+                elif not _empty(lo) and row.qty_plan < lo:
+                    add(
+                        "info",
+                        "orders",
+                        row.item,
+                        f"Заказ {row.number}: {_n(row.qty_plan)} шт меньше минимальной серии {_n(lo)}",
+                    )
         done = orders[(orders["qty_plan"] > 0) & (orders["qty"] <= 0)]
         for row in done.itertuples():
             add("info", "orders", row.name, f"Заказ {row.number}: выполнен полностью, на Ганте его нет")

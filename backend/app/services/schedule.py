@@ -207,11 +207,13 @@ def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
     snapshot_id = snapshot_id or latest_snapshot_id(session)
     if not snapshot_id:
         raise LookupError("Нет снимка данных — сначала загрузите выгрузки 1С")
-    groups = dict(
-        session.execute(
-            select(models.Item.name, models.Item.line_group).where(models.Item.snapshot_id == snapshot_id)
-        ).all()
-    )
+    item_rows = session.execute(
+        select(models.Item.name, models.Item.line_group, models.Item.stm).where(
+            models.Item.snapshot_id == snapshot_id
+        )
+    ).all()
+    groups = {name: group for name, group, _ in item_rows}
+    stm_items = {name for name, _, stm in item_rows if stm}
     orders = session.scalars(
         select(models.ProductionOrder).where(
             models.ProductionOrder.snapshot_id == snapshot_id,
@@ -237,13 +239,13 @@ def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
         else:
             changed = (task.qty, task.item, task.status, task.qty_done) != (o.qty, item, o.status, o.qty_done)
             updated += changed
-            # этап начат в 1С — закрепляем его линию, если планировщик ничего не закреплял вручную
             # этап начат в 1С — его линия из 1С, место в очереди больше не меняется
             if started and task.status != STARTED and line_1c:
                 task.line_code, task.line_locked, task.seq = line_1c, True, None
         task.qty, task.item, task.line_group = o.qty, item, group
         task.status, task.line_1c, task.started_at = o.status, o.line_1c, o.started_at
         task.qty_plan, task.qty_done = o.qty_plan, o.qty_done
+        task.stm = item in stm_items
     removed = [n for n in existing if n not in seen]
     if removed:
         session.execute(delete(models.ScheduleTask).where(models.ScheduleTask.number.in_(removed)))

@@ -280,8 +280,20 @@ export default function Stage2Page() {
                         <Table.Td ta="right">{num.format(l.plan_horizon)}</Table.Td>
                         <Table.Td ta="right">{num.format(l.gp_stock)}</Table.Td>
                         <Table.Td ta="right">{num.format(l.open_orders)}</Table.Td>
-                        <Table.Td ta="right" fw={600}>
-                          {num.format(l.need)}
+                        <Table.Td ta="right">
+                          <Text size="sm" fw={600}>
+                            {num.format(l.need)}
+                          </Text>
+                          {l.need > 0 && (l.series ?? 1) > 1 && (
+                            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                              {l.series} сер. по {num.format(l.series_size ?? 0)}
+                            </Text>
+                          )}
+                          {l.need > 0 && (l.series ?? 1) === 1 && l.min_series && l.need === l.min_series && (
+                            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                              мин. серия
+                            </Text>
+                          )}
                         </Table.Td>
                         <Table.Td ta="right">{num.format(l.feasible)}</Table.Td>
                         <Table.Td>
