@@ -48,7 +48,7 @@ def load_planning_data(session: Session, snapshot_id: int, with_reserve: bool = 
         session,
         models.SpecLine,
         snapshot_id,
-        ["spec", "component", "characteristic", "qty_per_1000"],
+        ["spec", "component", "component_kind", "characteristic", "qty_per_1000"],
         models.SpecLine.is_effective.is_(True),
     )
     plan = _frame(session, models.SalesPlanRow, snapshot_id, ["item", "month", "qty"])

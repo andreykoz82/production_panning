@@ -79,6 +79,7 @@ class SpecLine(_SnapshotRow, Base):
     status: Mapped[str | None] = mapped_column(String(50))
     version: Mapped[int] = mapped_column(Integer)
     component: Mapped[str] = mapped_column(String(300))
+    component_kind: Mapped[str | None] = mapped_column(String(150))  # вид номенклатуры из 1С
     characteristic: Mapped[str | None] = mapped_column(String(200))
     qty_per_1000: Mapped[float] = mapped_column(Float)
     is_effective: Mapped[bool] = mapped_column(Boolean, default=False)

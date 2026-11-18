@@ -74,6 +74,7 @@ def save_snapshot(session: Session, result: ImportResult, source: str) -> models
         "status",
         "version",
         "component",
+        "component_kind",
         "characteristic",
         "qty_per_1000",
         "is_effective",

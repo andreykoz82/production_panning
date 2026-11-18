@@ -250,3 +250,33 @@ def test_specs_new_layout_versions_not_contiguous(tmp_path):
     assert one.loc["Лента отрывная (импорт)", "qty_per_1000"] == 255
     assert one.loc["Лента отрывная (импорт)", "analogs"] == "Лента отрывная"
     assert len(one) == 3 and one["versions_active"].iloc[0] == 2
+
+
+def test_specs_component_kind(tmp_path):
+    """С 18.11.2026: «Номенклатура, Вид номенклатуры» — вид после последней запятой."""
+    from app.importers.specs import parse_specs
+
+    header = [
+        "Номенклатура, Вид номенклатуры",
+        "Характеристика",
+        "Ресурсная спецификация",
+        "Количество упаковок",
+    ]
+    rows = [
+        ["Ромашка цветки НФП, Нерасфасованные продукты КЛС", "КП", "Фп Ромашка 20x1,5г", 31],
+        [
+            "Лента термотрансферная для принтера, 135 мм, Вспомогательные материалы для производства",
+            None,
+            "Фп Ромашка 20x1,5г",
+            4.7,
+        ],
+        ["Спирт этиловый", None, "Фп Ромашка 20x1,5г", 0.01],
+    ]
+    path = tmp_path / "specs.xlsx"
+    pd.DataFrame([["Параметры:", None, None, None], header, *rows]).to_excel(path, header=False, index=False)
+    specs = parse_specs(path).set_index("component")
+    assert specs.loc["Ромашка цветки НФП", "component_kind"] == "Нерасфасованные продукты КЛС"
+    assert specs.loc["Лента термотрансферная для принтера, 135 мм", "component_kind"] == (
+        "Вспомогательные материалы для производства"
+    )
+    assert pd.isna(specs.loc["Спирт этиловый", "component_kind"])

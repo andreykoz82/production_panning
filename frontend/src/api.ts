@@ -118,6 +118,7 @@ export interface Stage2Line {
 
 export interface MaterialLine {
   material: string
+  kind?: string | null
   need: number
   available: number
   shortage: number

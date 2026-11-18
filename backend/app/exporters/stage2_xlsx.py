@@ -8,6 +8,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app import models
+from app.reference.material_kinds import kind_rank
 from app.reference.warehouses import ROLES
 
 HEADER_FILL = PatternFill("solid", fgColor="DDEBF7")
@@ -61,6 +62,7 @@ STM_COLUMNS = [
 ]
 
 MATERIAL_COLUMNS = [
+    ("Вид номенклатуры", "kind", 34, None),
     ("Материал", "material", 60, None),
     ("Нужно", "need", 13, KG),
     ("На складе", "available", 13, KG),
@@ -125,12 +127,13 @@ def build_stage2_workbook(run: models.PlanRun) -> bytes:
     lines = [r for r in all_lines if not r.get("stm")]
     stm = [r for r in all_lines if r.get("stm")]
     _sheet(wb, "К фасовке", LINE_COLUMNS, [r for r in lines if r["need"] > 0], status_col="status")
-    _sheet(wb, "Дефицит материалов", MATERIAL_COLUMNS, [m for m in run.materials if m["shortage"] > 0])
+    materials = sorted(run.materials, key=lambda m: (kind_rank(m.get("kind")), -m["shortage"], m["material"]))
+    _sheet(wb, "Дефицит материалов", MATERIAL_COLUMNS, [m for m in materials if m["shortage"] > 0])
     _sheet(wb, "Дефицит НФП (1 ступень)", NFP_COLUMNS, run.nfp)
     if stm:
         _sheet(wb, "СТМ (по письму клиента)", STM_COLUMNS, stm, status_col="status")
     _sheet(wb, "Все позиции", LINE_COLUMNS, lines, status_col="status")
-    _sheet(wb, "Все материалы", MATERIAL_COLUMNS, run.materials)
+    _sheet(wb, "Все материалы", MATERIAL_COLUMNS, materials)
 
     ws = wb.create_sheet("Параметры")
     p, s = run.params, run.summary
