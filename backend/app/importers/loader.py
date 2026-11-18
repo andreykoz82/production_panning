@@ -12,7 +12,7 @@ from app.importers.matching import match_items_to_specs, match_to_catalog
 from app.importers.orders import ORDER_COLUMNS, link_stage1_orders, parse_orders
 from app.importers.quality import Issue, check_quality
 from app.importers.sales_plan import parse_sales_plan
-from app.importers.specs import effective_specs, is_nfp_component, parse_specs
+from app.importers.specs import effective_specs, is_nfp_component, parse_specs, spec_products
 from app.importers.stock import parse_stock
 
 # Как узнаём файл по имени (без учёта регистра)
@@ -75,8 +75,12 @@ class ImportResult:
             "items_stm": int((items["in_scope"] & items["stm"]).sum()),
             "items_with_spec": int((items["in_scope"] & items["spec"].notna()).sum()),
             "items_spec_to_confirm": int(items["spec_needs_confirmation"].sum()),
+            "items_spec_by_product": int((items["spec_method"] == "product").sum()),
             "stock_rows": int(len(self.stock)),
             "specs_total": int(self.specs_effective["spec"].nunique()),
+            "specs_with_products": int(self.specs_effective.dropna(subset=["products"])["spec"].nunique())
+            if "products" in self.specs_effective.columns
+            else 0,
             "specs_multi_version": int(
                 (self.specs_effective.groupby("spec")["versions_active"].first() > 1).sum()
             ),
@@ -122,15 +126,20 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
     # Ссылки отчётов на справочник ГП
     catalog = items["name"]
     plan["item"] = match_to_catalog(plan["name"], catalog)
-    # заказы 2 ступени → ГП из справочника; 1 ступени → НФП и фракция
-    orders["item"] = match_to_catalog(orders["name"], catalog).where(orders["stage"] == 2, None)
+    # заказы: в отчёте — имя спецификации этапа; её изделие (если выгружено) точнее имени
+    products = spec_products(specs)
+    order_product = orders["name"].map(lambda s: (products.get(s) or [None])[0])
+    by_product = match_to_catalog(order_product.fillna(""), catalog)
+    by_name = match_to_catalog(orders["name"], catalog)
+    # 2 ступень → ГП из справочника; 1 ступень → НФП и фракция
+    orders["item"] = by_product.fillna(by_name).where(orders["stage"] == 2, None)
     nfp_catalog = (
         set(items["nfp"].dropna())
         | set(specs_eff.loc[specs_eff["component"].map(is_nfp_component), "component"])
         | set(stock.loc[stock["name"].str.contains("НФП", na=False), "name"])
     )
     fractions = stock["characteristic"].dropna().unique().tolist()
-    orders = link_stage1_orders(orders, sorted(nfp_catalog), fractions)
+    orders = link_stage1_orders(orders, sorted(nfp_catalog), fractions, products)
     # ссылка на ГП для всех строк: какие склады считать запасом ГП, решают роли складов
     stock["item"] = match_to_catalog(stock["name"], catalog)
 

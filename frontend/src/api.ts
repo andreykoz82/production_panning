@@ -13,6 +13,8 @@ export interface Snapshot {
     items_spec_to_confirm: number
     stock_rows: number
     specs_total: number
+    specs_with_products?: number
+    items_spec_by_product?: number
     specs_multi_version: number
     plan_rows: number
     plan_from: string | null

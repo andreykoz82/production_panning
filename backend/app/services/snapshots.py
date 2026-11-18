@@ -66,10 +66,8 @@ def save_snapshot(session: Session, result: ImportResult, source: str) -> models
     ]
     session.execute(insert(models.StockRow), _records(result.stock, stock_cols, sid))
 
-    eff = result.specs_effective[["spec", "version", "component", "analogs"]].drop_duplicates(
-        ["spec", "version", "component"]
-    )
-    specs = result.specs.merge(eff, on=["spec", "version", "component"], how="left", indicator=True)
+    eff = result.specs_effective[["row_id", "analogs"]]
+    specs = result.specs.merge(eff, on="row_id", how="left", indicator=True)
     specs["is_effective"] = specs["_merge"] == "both"
     spec_cols = [
         "spec",

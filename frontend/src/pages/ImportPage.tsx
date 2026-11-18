@@ -42,6 +42,7 @@ const AREA: Record<string, string> = {
 }
 
 const METHOD: Record<string, { label: string; color: string }> = {
+  product: { label: 'по изделию спецификации', color: 'green' },
   exact: { label: 'точно', color: 'teal' },
   normalized: { label: 'иное написание', color: 'blue' },
   printed_material: { label: 'по печатному материалу', color: 'indigo' },
@@ -173,7 +174,7 @@ export default function ImportPage() {
               color="blue"
               label="Со спецификацией"
               value={snap.summary.items_with_spec}
-              hint={`проверить связь: ${snap.summary.items_spec_to_confirm}`}
+              hint={`по изделию спецификации: ${snap.summary.items_spec_by_product ?? 0}; проверить связь: ${snap.summary.items_spec_to_confirm}`}
             />
             <StatCard
               icon={<IconFileSpreadsheet size={20} />}
