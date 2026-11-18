@@ -1,4 +1,5 @@
-# Запуск: docker compose up -d --build   →   http://localhost:8080
+# Запуск: docker compose up -d --build   →   http://localhost:8090
+# Другой порт: файл .env рядом с этим файлом со строкой APP_PORT=9000
 services:
   db:
     image: postgres:16-alpine
@@ -30,7 +31,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "8080:80"
+      - "${APP_PORT:-8090}:80"  # 8080 часто занят камерами и другими сервисами
     depends_on:
       - backend
     restart: unless-stopped
