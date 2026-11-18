@@ -165,27 +165,27 @@ def test_sync_without_snapshot(client):
 
 
 def test_warehouse_roles(client, data_dir):
+    from app.reference.warehouses import DEFAULT_ROLES
+
     client.post("/api/imports/from-folder")
     data = client.get("/api/warehouses").json()
     roles = {w["warehouse"]: w for w in data["warehouses"]}
-    assert roles["Кладовая 2 ступени производства"]["role"] == "materials"
-    assert roles["Производство 2 ступени"]["role"] == "ignore"
+    # роли по умолчанию — из справочника, для складов из отчёта и для известных, которых сейчас нет
+    for name, w in roles.items():
+        assert w["role"] == DEFAULT_ROLES.get(name, "ignore")
+    mat = "Материальный склад"
+    assert roles[mat]["role"] == "materials"
     run1 = client.post("/api/planning/stage2", json={"horizon_months": 3}).json()
-    assert "Кладовая 2 ступени производства" in run1["summary"]["warehouses"]["materials"]
+    assert mat in run1["summary"]["warehouses"]["materials"]
 
-    r = client.put("/api/warehouses", json={"warehouse": "Кладовая 2 ступени производства", "role": "ignore"})
-    assert r.status_code == 200
-    w = next(
-        x for x in client.get("/api/warehouses").json()["warehouses"] if x["warehouse"].startswith("Кладовая")
-    )
+    assert client.put("/api/warehouses", json={"warehouse": mat, "role": "ignore"}).status_code == 200
+    w = next(x for x in client.get("/api/warehouses").json()["warehouses"] if x["warehouse"] == mat)
     assert w["role"] == "ignore" and w["manual"]
     run2 = client.post("/api/planning/stage2", json={"horizon_months": 3}).json()
-    assert "Кладовая 2 ступени производства" not in run2["summary"]["warehouses"].get("materials", [])
+    assert mat not in run2["summary"]["warehouses"].get("materials", [])
 
-    client.put("/api/warehouses", json={"warehouse": "Кладовая 2 ступени производства", "role": None})
-    w = next(
-        x for x in client.get("/api/warehouses").json()["warehouses"] if x["warehouse"].startswith("Кладовая")
-    )
+    client.put("/api/warehouses", json={"warehouse": mat, "role": None})
+    w = next(x for x in client.get("/api/warehouses").json()["warehouses"] if x["warehouse"] == mat)
     assert w["role"] == "materials" and not w["manual"]
     assert client.put("/api/warehouses", json={"warehouse": "X", "role": "nonsense"}).status_code == 422
 
