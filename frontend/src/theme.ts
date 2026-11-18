@@ -29,9 +29,17 @@ export const theme = createTheme({
     Card: Card.extend({ defaultProps: { withBorder: true, shadow: 'xs', radius: 'lg' } }),
     Paper: Paper.extend({ defaultProps: { radius: 'lg' } }),
     Table: Table.extend({
-      defaultProps: { highlightOnHover: true, verticalSpacing: 8, horizontalSpacing: 'sm' },
+      // шапка таблицы прилипает под верхней панелью приложения (60 px) при прокрутке страницы
+      defaultProps: {
+        highlightOnHover: true,
+        verticalSpacing: 8,
+        horizontalSpacing: 'sm',
+        stickyHeader: true,
+        stickyHeaderOffset: 60,
+      },
       styles: {
         th: { fontSize: 12, fontWeight: 600, color: 'var(--mantine-color-gray-7)', whiteSpace: 'nowrap' },
+        thead: { zIndex: 3, boxShadow: '0 1px 0 var(--mantine-color-gray-3)' },
       },
     }),
     Badge: Badge.extend({ defaultProps: { variant: 'light', radius: 'sm' } }),
