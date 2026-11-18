@@ -13,6 +13,9 @@
    Отклонение до 10 % (на складе ≥ 90 % потребности) дефицитом не считается (17.11.2026).
 6. НФП и общие материалы распределяются по позициям в порядке приоритета.
 7. Задание 1 ступени по НФП округляется до 100 кг (17.11.2026).
+8. СТМ («ТМ Будь здоров») производится только по письму клиента: план по СТМ — прогноз,
+   а не задание. СТМ идёт после всех наших позиций (получает остаток НФП и упаковки),
+   в сводку, дефицит материалов и задание 1 ступени не входит (18.11.2026).
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from app.importers.specs import analog_key
 from app.planning.calendar import add_months, add_workdays, month_end, workdays, workdays_in_month
 from app.reference import warehouses as wh
 from app.reference.lines import NFP_QUARANTINE_WORKDAYS, STAGE2_GROUPS, lines_in_group
+from app.reference.stm import is_stm
 
 ABC_ORDER = {"A": 0, "B": 1, "C": 2}
 MATERIAL_TOLERANCE = 0.10  # нехватка материала до 10 % от потребности — не дефицит
@@ -74,7 +78,9 @@ class Stage2Result:
 
     @property
     def summary(self) -> dict:
-        lines = self.lines
+        all_lines = self.lines
+        stm = all_lines[all_lines["stm"]] if "stm" in all_lines.columns else all_lines.iloc[0:0]
+        lines = all_lines[~all_lines.index.isin(stm.index)]
         needed = lines[lines["need"] > 0]
         return {
             "horizon_months": self.params.horizon_months,
@@ -90,6 +96,10 @@ class Stage2Result:
             "nfp_shortage_kg": float(self.nfp["shortage_kg"].sum()) if len(self.nfp) else 0.0,
             "nfp_stage1_orders_kg": float(self.nfp["stage1_orders_kg"].sum()) if len(self.nfp) else 0.0,
             "nfp_uncovered_kg": float(self.nfp["uncovered_kg"].sum()) if len(self.nfp) else 0.0,
+            "stm_items": int(len(stm)),
+            "stm_needed": int((stm["need"] > 0).sum()),
+            "stm_need_units": float(stm["need"].sum()),
+            "stm_feasible_units": float(stm["feasible"].sum()),
             "month_factors": self.month_factors,
             "warehouses": self.warehouses,
         }
@@ -189,6 +199,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
         rows.append(
             {
                 "item": it.name,
+                "stm": is_stm(it.name),
                 "abc": it.abc,
                 "line_group": it.line_group,
                 "spec": it.spec,
@@ -206,7 +217,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
     lines = pd.DataFrame(rows)
     far = date(9999, 1, 1)
     lines["_order"] = lines.apply(
-        lambda r: (r["stockout_month"] or far, ABC_ORDER.get(r["abc"], 3), -r["need"]), axis=1
+        lambda r: (r["stm"], r["stockout_month"] or far, ABC_ORDER.get(r["abc"], 3), -r["need"]), axis=1
     )
     lines = lines.sort_values("_order", kind="stable").drop(columns="_order").reset_index(drop=True)
     lines.insert(0, "priority", range(1, len(lines) + 1))
@@ -237,7 +248,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
     total_mat_need: dict[str, float] = {}
     for row in lines.itertuples(index=False):
         spec = spec_by_name.get(row.spec)
-        if row.need <= 0 or spec is None or not row.nfp or row.line_group not in STAGE2_GROUPS:
+        if row.stm or row.need <= 0 or spec is None or not row.nfp or row.line_group not in STAGE2_GROUPS:
             continue
         for m in spec[(spec["component"] != row.nfp) & (spec["qty_per_1000"] > 0)].itertuples(index=False):
             k = analog_key(m.component)
@@ -278,8 +289,9 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
                 k = analog_key(m.component)
                 mat_names.setdefault(k, m.component)
                 per_unit = m.qty_per_1000 / 1000
-                material_need[k] = material_need.get(k, 0.0) + row.need * per_unit
-                material_items.setdefault(k, set()).add(row.item)
+                if not row.stm:  # СТМ — прогноз, в дефицит упаковки не входит
+                    material_need[k] = material_need.get(k, 0.0) + row.need * per_unit
+                    material_items.setdefault(k, set()).add(row.item)
                 limits[m.component] = mat_pool.get(k) / per_unit
             cap = min(limits.values()) if limits else row.need
             feasible = float(min(row.need, math.floor(cap)))
@@ -299,7 +311,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
             quarantine_kg = 0.0 if purchased else float(nfp_quarantine.get(key, 0.0))
             unreleased_kg = 0.0 if purchased else float(nfp_unreleased.get(key, 0.0))
             shortage = max(need_kg - avail_kg, 0.0)
-            if not purchased:
+            if not purchased and not row.stm:
                 agg = nfp_by_key.setdefault(key, {"need_kg": 0.0, "items": []})
                 agg["need_kg"] += need_kg
                 agg["items"].append(row.item)

@@ -42,6 +42,21 @@ LINE_COLUMNS = [
     ("НФП без «Фасовка = Да», кг", "nfp_unreleased_kg", 12, KG),
     ("Дефицит НФП, кг", "nfp_shortage_kg", 11, KG),
 ]
+# СТМ: план — прогноз; «можно выпустить» — из остатка НФП и упаковки после наших позиций
+STM_COLUMNS = [
+    ("ГП", "item", 55, None),
+    ("ABC", "abc", 6, None),
+    ("Группа линий", "line_group", 18, None),
+    ("Прогноз продаж на горизонт", "plan_horizon", 14, INT),
+    ("Запас ГП", "gp_stock", 12, INT),
+    ("Открытые заказы", "open_orders", 12, INT),
+    ("Не хватит до конца горизонта", "need", 14, INT),
+    ("Месяц, когда кончится ГП", "stockout_month", 14, "month"),
+    ("Можно выпустить при заказе", "feasible", 14, INT),
+    ("Ограничение", "limit", 40, None),
+    ("Статус", "status", 14, None),
+]
+
 MATERIAL_COLUMNS = [
     ("Материал", "material", 60, None),
     ("Нужно", "need", 13, KG),
@@ -103,10 +118,14 @@ def _sheet(wb: Workbook, title: str, columns, rows: list[dict], status_col: str 
 def build_stage2_workbook(run: models.PlanRun) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
-    lines = sorted(run.lines, key=lambda r: r["priority"])
+    all_lines = sorted(run.lines, key=lambda r: r["priority"])
+    lines = [r for r in all_lines if not r.get("stm")]
+    stm = [r for r in all_lines if r.get("stm")]
     _sheet(wb, "К фасовке", LINE_COLUMNS, [r for r in lines if r["need"] > 0], status_col="status")
     _sheet(wb, "Дефицит материалов", MATERIAL_COLUMNS, [m for m in run.materials if m["shortage"] > 0])
     _sheet(wb, "Дефицит НФП (1 ступень)", NFP_COLUMNS, run.nfp)
+    if stm:
+        _sheet(wb, "СТМ (по письму клиента)", STM_COLUMNS, stm, status_col="status")
     _sheet(wb, "Все позиции", LINE_COLUMNS, lines, status_col="status")
     _sheet(wb, "Все материалы", MATERIAL_COLUMNS, run.materials)
 
@@ -124,6 +143,10 @@ def build_stage2_workbook(run: models.PlanRun) -> bytes:
         ),
         ("Потребность, шт", s["need_units"]),
         ("Можно выпустить сейчас, шт", s["feasible_units"]),
+        (
+            "СТМ: позиций / прогноз, шт",
+            f"{s.get('stm_items', 0)} / {s.get('stm_need_units', 0):,.0f}".replace(",", " "),
+        ),
         ("", ""),
         ("Доля плана месяца в горизонте", ""),
         *[(date.fromisoformat(m).strftime("%m.%Y"), f) for m, f in s["month_factors"].items()],
@@ -136,7 +159,9 @@ def build_stage2_workbook(run: models.PlanRun) -> bytes:
             "К фасовке = план на горизонт − запас ГП (склад ГП + опт) − открытые заказы; "
             "не меньше выпуска линии за 1 ч. НФП — с той же фракцией, назначением и «Фасовка = Да». "
             "НФП и материалы распределены по приоритету. Нехватка материала до 10 % — не дефицит. "
-            "Задание 1 ступени по НФП округлено до 100 кг.",
+            "Задание 1 ступени по НФП округлено до 100 кг. СТМ («ТМ Будь здоров») производится по письму "
+            "клиента: план по ней — прогноз, получает остаток НФП и упаковки после наших позиций, "
+            "в дефициты не входит.",
         ),
     ]
     for r, (k, v) in enumerate(info, start=1):

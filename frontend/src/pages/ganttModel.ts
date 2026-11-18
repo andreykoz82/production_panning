@@ -62,6 +62,11 @@ export const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 function marks(t: ScheduleTask) {
+  const stm = t.stm ? '<span class="mk-stm" title="СТМ — заказ по письму клиента">СТМ</span> ' : ''
+  return stm + startMarks(t)
+}
+
+function startMarks(t: ScheduleTask) {
   if (t.status === 'Начат') return '<span class="mk-started" title="Начат в 1С — место зафиксировано">▶</span> '
   return t.line_locked ? '<span class="mk-pinned" title="Очередь линии задана вручную">📍</span> ' : ''
 }
@@ -123,7 +128,12 @@ export function buildItems(
     const segments = workingSegments(new Date(t.start).getTime(), new Date(t.end).getTime(), off.get(t.line_code) ?? [])
     const title = tooltip(t)
     const started = t.status === 'Начат'
-    const state = [t.warnings.length ? 'warn' : '', started ? 'started' : '', t.line_locked && !started ? 'pinned' : '']
+    const state = [
+      t.warnings.length ? 'warn' : '',
+      started ? 'started' : '',
+      t.line_locked && !started ? 'pinned' : '',
+      t.stm ? 'stm' : '',
+    ]
       .filter(Boolean)
       .join(' ')
     const label = shortNumber(t.number).stage

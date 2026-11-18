@@ -164,7 +164,7 @@ export default function ImportPage() {
               icon={<IconPackage size={20} />}
               label="ГП в планировании"
               value={`${snap.summary.items_in_scope} из ${snap.summary.items_total}`}
-              hint="без розлива и контрактной площадки"
+              hint={`без розлива и контрактной площадки${snap.summary.items_stm ? `; из них СТМ ${snap.summary.items_stm}` : ''}`}
             />
             <StatCard
               icon={<IconListCheck size={20} />}

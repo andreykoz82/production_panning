@@ -8,6 +8,7 @@ export interface Snapshot {
   summary: {
     items_total: number
     items_in_scope: number
+    items_stm?: number
     items_with_spec: number
     items_spec_to_confirm: number
     stock_rows: number
@@ -83,6 +84,7 @@ export type Stage2Status = 'Не требуется' | 'Можно фасова�
 export interface Stage2Line {
   priority: number
   item: string
+  stm?: boolean
   abc: string
   line_group: string | null
   nfp: string | null
@@ -148,6 +150,10 @@ export interface PlanRun {
     nfp_shortage_kg: number
     nfp_stage1_orders_kg?: number
     nfp_uncovered_kg?: number
+    stm_items?: number
+    stm_needed?: number
+    stm_need_units?: number
+    stm_feasible_units?: number
     month_factors: Record<string, number>
     warehouses?: Record<string, string[]>
   }
@@ -212,6 +218,7 @@ export interface ScheduleTask {
   line_locked: boolean
   seq: number | null
   stockout_month: string | null
+  stm: boolean
   available_from: string | null
   warnings: string[]
   status: string | null

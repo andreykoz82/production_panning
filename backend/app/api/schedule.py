@@ -52,6 +52,7 @@ class TaskOut(BaseModel):
     line_locked: bool
     seq: int | None = None
     stockout_month: date | None = None
+    stm: bool = False
     available_from: date | None
     warnings: list[str]
     status: str | None = None

@@ -227,8 +227,10 @@ function TaskCard({
       radius="md"
       p={8}
       shadow={dragging ? 'md' : 'xs'}
-      bg={locked ? 'green.0' : t.warnings.length ? 'orange.0' : 'white'}
-      style={{ borderColor: locked ? 'var(--mantine-color-green-4)' : undefined }}
+      bg={locked ? 'green.0' : t.warnings.length ? 'orange.0' : t.stm ? 'violet.0' : 'white'}
+      style={{
+        borderColor: locked ? 'var(--mantine-color-green-4)' : t.stm ? 'var(--mantine-color-violet-3)' : undefined,
+      }}
     >
       <Group gap={6} wrap="nowrap" align="flex-start">
         {locked ? (
@@ -248,12 +250,19 @@ function TaskCard({
               {shortNo(t.number)}
             </Text>
             <Group gap={4} wrap="nowrap">
+              {t.stm && (
+                <Tooltip label="СТМ — заказ поставлен по письму клиента">
+                  <Badge size="xs" color="violet" variant="filled">
+                    СТМ
+                  </Badge>
+                </Tooltip>
+              )}
               {locked && (
                 <Badge size="xs" color="green">
                   начат
                 </Badge>
               )}
-              {stockout && !locked && (
+              {stockout && !locked && !t.stm && (
                 <Tooltip label="Когда кончится запас ГП — по нему приоритет">
                   <Badge size="xs" color="gray">
                     запас до {stockout}

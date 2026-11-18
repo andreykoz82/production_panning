@@ -7,6 +7,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.reference.stm import is_stm
 
 
 class ImportSnapshot(Base):
@@ -186,6 +187,11 @@ class ScheduleTask(Base):
     available_from: Mapped[date | None] = mapped_column(Date)
     warnings: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    @property
+    def stm(self) -> bool:
+        """СТМ — заказ поставлен по письму клиента."""
+        return is_stm(self.item)
 
 
 class WarehouseRole(Base):
