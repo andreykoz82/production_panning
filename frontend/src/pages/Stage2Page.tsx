@@ -22,6 +22,7 @@ import {
   IconClipboardList,
   IconDownload,
   IconLeaf,
+  IconMail,
   IconPackages,
 } from '@tabler/icons-react'
 
@@ -91,9 +92,10 @@ export default function Stage2Page() {
     if (!run) return []
     const q = search.trim().toLowerCase()
     return run.lines.filter(
-      (l) => (scope === 'all' || l.need > 0) && (!q || `${l.item} ${l.nfp ?? ''}`.toLowerCase().includes(q)),
+      (l) => !l.stm && (scope === 'all' || l.need > 0) && (!q || `${l.item} ${l.nfp ?? ''}`.toLowerCase().includes(q)),
     )
   }, [run, scope, search])
+  const stmLines = useMemo(() => (run ? run.lines.filter((l) => l.stm) : []), [run])
 
   const s = run?.summary
 
@@ -166,7 +168,9 @@ export default function Stage2Page() {
               icon={<IconPackages size={20} />}
               label="Позиций к фасовке"
               value={`${s.items_needed} из ${s.items}`}
-              hint={`полностью ${s.items_full}, частично ${s.items_partial}, нельзя ${s.items_blocked}`}
+              hint={`полностью ${s.items_full}, частично ${s.items_partial}, нельзя ${s.items_blocked}${
+                s.stm_items ? ` · СТМ отдельно: ${s.stm_items}` : ''
+              }`}
             />
             <StatCard
               icon={<IconBox size={20} />}
@@ -220,6 +224,11 @@ export default function Stage2Page() {
               <Tabs.Tab value="nfp" leftSection={<IconLeaf size={16} />}>
                 Дефицит НФП ({run.nfp.length})
               </Tabs.Tab>
+              {stmLines.length > 0 && (
+                <Tabs.Tab value="stm" leftSection={<IconMail size={16} />} color="violet">
+                  СТМ — по письму клиента ({stmLines.length})
+                </Tabs.Tab>
+              )}
             </Tabs.List>
 
             <Tabs.Panel value="items" pt="md">
@@ -285,6 +294,70 @@ export default function Stage2Page() {
                             <Text size="sm">
                               НФП: есть {kg.format(l.nfp_available_kg)} из {kg.format(l.nfp_need_kg)} кг
                               {l.nfp_quarantine_kg > 0 && `, на карантине ${kg.format(l.nfp_quarantine_kg)}`}
+                            </Text>
+                          ) : (
+                            <Text size="sm">{l.limit ?? ''}</Text>
+                          )}
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Section>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="stm" pt="md">
+              <Alert color="violet" variant="light" mb="sm" icon={<IconMail size={18} />}>
+                СТМ (ТМ «Будь здоров!») фасуется только после письма клиента, поэтому план продаж здесь — прогноз, а не
+                задание. В расчёте СТМ идёт после всех наших позиций: «Можно выпустить при заказе» — из НФП и упаковки,
+                которые остались. В сводку, дефицит материалов и задание 1 ступени СТМ не входит. Заказ, поставленный в
+                1С по письму, попадает на график как обычно — с пометкой СТМ.
+              </Alert>
+              <Section p={0}>
+                <Table fz="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>ГП</Table.Th>
+                      <Table.Th>ABC</Table.Th>
+                      <Table.Th>Кончится</Table.Th>
+                      <Table.Th ta="right">Прогноз на горизонт</Table.Th>
+                      <Table.Th ta="right">Запас ГП</Table.Th>
+                      <Table.Th ta="right">В заказах</Table.Th>
+                      <Table.Th ta="right">Не хватит по прогнозу</Table.Th>
+                      <Table.Th ta="right">Можно выпустить при заказе</Table.Th>
+                      <Table.Th>Что ограничивает</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {stmLines.map((l) => (
+                      <Table.Tr key={l.item}>
+                        <Table.Td>
+                          <Text size="sm">{l.item}</Text>
+                          <Text size="xs" c="dimmed">
+                            {l.line_group}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>{l.abc}</Table.Td>
+                        <Table.Td>{month(l.stockout_month)}</Table.Td>
+                        <Table.Td ta="right">{num.format(l.plan_horizon)}</Table.Td>
+                        <Table.Td ta="right">{num.format(l.gp_stock)}</Table.Td>
+                        <Table.Td ta="right">
+                          {l.open_orders > 0 ? (
+                            <Badge color="violet">{num.format(l.open_orders)}</Badge>
+                          ) : (
+                            <Text size="sm" c="dimmed">
+                              ждёт письма
+                            </Text>
+                          )}
+                        </Table.Td>
+                        <Table.Td ta="right" fw={600}>
+                          {l.need > 0 ? num.format(l.need) : '—'}
+                        </Table.Td>
+                        <Table.Td ta="right">{l.need > 0 ? num.format(l.feasible) : '—'}</Table.Td>
+                        <Table.Td>
+                          {l.limit === 'НФП' ? (
+                            <Text size="sm">
+                              НФП: осталось {kg.format(l.nfp_available_kg)} из {kg.format(l.nfp_need_kg)} кг
                             </Text>
                           ) : (
                             <Text size="sm">{l.limit ?? ''}</Text>

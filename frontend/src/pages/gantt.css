@@ -146,3 +146,24 @@
   color: #2f9e44;
   font-size: 10px;
 }
+
+/* СТМ — заказы по письму клиента, фиолетовые */
+.gantt-1c .mk-stm {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #e5dbff;
+  color: #5f3dc4;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+.gantt-1c .vis-item.seg-line.stm {
+  background: #9775fa;
+  border-color: #5f3dc4;
+  color: #fff;
+}
+.gantt-1c .vis-item.seg-task.stm {
+  background: #e5dbff;
+  border-color: #7048e8;
+}

@@ -66,7 +66,8 @@ def test_stage2_run_and_export(client, data_dir):
     client.post("/api/imports/from-folder")
     run = client.post("/api/planning/stage2", json={"horizon_months": 3, "calc_date": "2026-11-17"}).json()
     assert run["summary"]["items"] > 100
-    assert len(run["lines"]) == run["summary"]["items"]
+    assert len(run["lines"]) == run["summary"]["items"] + run["summary"]["stm_items"]
+    assert run["summary"]["stm_items"] == sum(1 for r in run["lines"] if r["stm"])
     assert client.get("/api/planning/runs").json()[0]["id"] == run["id"]
     xlsx = client.get(f"/api/planning/runs/{run['id']}/export")
     assert xlsx.status_code == 200 and xlsx.content[:2] == b"PK"

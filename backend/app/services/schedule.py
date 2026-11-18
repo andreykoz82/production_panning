@@ -194,6 +194,7 @@ def latest_stage2_run(session: Session, snapshot_id: int | None = None) -> model
 
 
 STARTED = "Начат"
+STM_PRIORITY = 0  # раньше любого нашего продукта (их приоритеты — с 1)
 
 
 def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
@@ -343,7 +344,8 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
                 item=db.item,
                 qty=db.qty,
                 group=db.line_group or "",
-                priority=started_rank.get(db.number, r.get("priority", math.inf)),
+                # СТМ ставят в 1С по письму клиента — такой заказ ждёт, его делаем раньше наших
+                priority=started_rank.get(db.number, STM_PRIORITY if db.stm else r.get("priority", math.inf)),
                 line_code=db.line_code,
                 start=db.start,
                 line_locked=db.line_locked,

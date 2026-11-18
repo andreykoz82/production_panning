@@ -259,3 +259,27 @@ def test_stage1_orders_cover_nfp_shortage_across_purposes():
     assert (b["stage1_orders_kg"], b["uncovered_kg"]) == (300.0, 0.0)  # сначала больший дефицит
     assert (a["stage1_orders_kg"], a["uncovered_kg"]) == (50.0, 50.0)  # остаток 350 − 300
     assert (whole["stage1_orders_kg"], whole["uncovered_kg"]) == (0.0, 50.0)  # другая фракция
+
+
+def test_stm_goes_after_own_products_and_out_of_deficits():
+    stm = 'Фиточай "Мята" (ТМ "Будь здоров!")(БАД) 50г'
+    data = _data(
+        items=[
+            {"name": stm, "nfp": "Мята НФП", "spec": stm, "abc": "A"},
+            {"name": "Мята 50г", "nfp": "Мята НФП", "spec": "Мята 50г", "abc": "C"},
+        ],
+        specs=_spec(stm) + _spec("Мята 50г"),
+        # у СТМ запас кончается раньше, но НФП сначала получает наш продукт
+        plan=[(stm, date(2026, 11, 1), 20_000), ("Мята 50г", date(2026, 12, 1), 10_000)],
+        stock=[_nfp(650), _box(100_000)],  # 650 кг НФП = 13 000 пачек
+    )
+    res = calculate_stage2(data, Stage2Params(2, CALC))
+    lines = res.lines.set_index("item")
+    assert not lines.loc["Мята 50г", "stm"] and lines.loc[stm, "stm"]
+    assert lines.loc["Мята 50г", "priority"] == 1 and lines.loc["Мята 50г", "feasible"] == 10_000
+    assert lines.loc[stm, "need"] == 10_000 and lines.loc[stm, "feasible"] == 3_000  # остаток НФП
+    s = res.summary
+    assert s["items_needed"] == 1 and s["need_units"] == 10_000  # СТМ в сводку не входит
+    assert s["stm_items"] == 1 and s["stm_need_units"] == 10_000 and s["stm_feasible_units"] == 3_000
+    assert res.nfp.empty  # прогноз СТМ не создаёт задания 1 ступени
+    assert res.materials["need"].sum() == 10_000 * 1.01  # упаковка — только под наш продукт

@@ -209,9 +209,11 @@ export default function GanttPage() {
   const warned = tasks.filter((t) => t.warnings.length).length
   const startedCount = tasks.filter((t) => t.status === STARTED).length
   const [tab, setTab] = useState<string | null>('chart')
-  const [filter, setFilter] = useState<'all' | 'warn' | 'started'>('all')
+  const [filter, setFilter] = useState<'all' | 'warn' | 'started' | 'stm'>('all')
+  const stmCount = tasks.filter((t) => t.stm).length
   const shown = tasks.filter(
-    (t) => filter === 'all' || (filter === 'warn' ? t.warnings.length > 0 : t.status === STARTED),
+    (t) =>
+      filter === 'all' || (filter === 'warn' ? t.warnings.length > 0 : filter === 'stm' ? t.stm : t.status === STARTED),
   )
 
   // vis-timeline не видит своих размеров, пока вкладка скрыта
@@ -315,7 +317,7 @@ export default function GanttPage() {
             </Button.Group>
             <Group gap="lg">
               <Text size="xs" c="dimmed">
-                ▶ начат в 1С · 📍 очередь задана вручную · бордовым — переналадка
+                ▶ начат в 1С · 📍 очередь задана вручную · фиолетовым — СТМ · бордовым — переналадка
               </Text>
               <Switch
                 label="Этапы под линиями"
@@ -357,6 +359,7 @@ export default function GanttPage() {
                 { value: 'all', label: `Все (${tasks.length})` },
                 { value: 'started', label: `Начатые (${startedCount})` },
                 { value: 'warn', label: `С предупреждениями (${warned})` },
+                { value: 'stm', label: `СТМ (${stmCount})` },
               ]}
             />
           </Group>
@@ -411,7 +414,14 @@ function OrderRow({
           </Text>
         )}
       </Table.Td>
-      <Table.Td>{t.item}</Table.Td>
+      <Table.Td>
+        {t.stm && (
+          <Badge size="xs" color="violet" variant="filled" mr={6}>
+            СТМ
+          </Badge>
+        )}
+        {t.item}
+      </Table.Td>
       <Table.Td>
         {started ? (
           <Badge size="sm" color="green">
