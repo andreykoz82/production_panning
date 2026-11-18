@@ -14,7 +14,6 @@ from app.importers.quality import Issue, check_quality
 from app.importers.sales_plan import parse_sales_plan
 from app.importers.specs import effective_specs, is_nfp_component, parse_specs
 from app.importers.stock import parse_stock
-from app.reference.stm import is_stm
 
 # Как узнаём файл по имени (без учёта регистра)
 FILE_PATTERNS = {
@@ -73,7 +72,7 @@ class ImportResult:
         return {
             "items_total": int(len(items)),
             "items_in_scope": int(items["in_scope"].sum()),
-            "items_stm": int((items["in_scope"] & items["name"].map(is_stm)).sum()),
+            "items_stm": int((items["in_scope"] & items["stm"]).sum()),
             "items_with_spec": int((items["in_scope"] & items["spec"].notna()).sum()),
             "items_spec_to_confirm": int(items["spec_needs_confirmation"].sum()),
             "stock_rows": int(len(self.stock)),

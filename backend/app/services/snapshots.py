@@ -42,8 +42,12 @@ def save_snapshot(session: Session, result: ImportResult, source: str) -> models
         "spec_method",
         "spec_score",
         "spec_needs_confirmation",
+        "min_series",
+        "max_series",
+        "stm",
     ]
-    session.execute(insert(models.Item), _records(result.items, item_cols, sid))
+    items = result.items.astype(object).where(result.items.notna(), None)
+    session.execute(insert(models.Item), _records(items, item_cols, sid))
 
     stock_cols = [
         "warehouse",

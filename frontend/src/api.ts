@@ -42,6 +42,10 @@ export interface Item {
   spec_method: string | null
   spec_score: number
   spec_needs_confirmation: boolean
+  kind?: string | null
+  min_series?: number | null
+  max_series?: number | null
+  stm?: boolean
 }
 
 export interface Line {
@@ -94,6 +98,10 @@ export interface Stage2Line {
   open_orders: number
   need: number
   min_batch: number
+  min_series?: number | null
+  max_series?: number | null
+  series?: number
+  series_size?: number
   stockout_month: string | null
   feasible: number
   limit: string | null

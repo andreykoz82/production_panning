@@ -16,6 +16,9 @@
 8. СТМ («ТМ Будь здоров») производится только по письму клиента: план по СТМ — прогноз,
    а не задание. СТМ идёт после всех наших позиций (получает остаток НФП и упаковки),
    в сводку, дефицит материалов и задание 1 ступени не входит (18.11.2026).
+   Признак СТМ — колонка «СТМ» в actual_items, иначе по наименованию.
+9. Серия: потребность не меньше минимальной серии; больше максимальной — делится на несколько
+   серий, каждая не меньше минимальной. Выпуск меньше минимальной серии — 0 (18.11.2026).
 """
 
 from __future__ import annotations
@@ -116,6 +119,31 @@ def _horizon_factors(calc_date: date, horizon: int) -> dict[date, float]:
     return factors
 
 
+def _positive(value) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 and not math.isnan(v) else None
+
+
+def _series_plan(
+    raw_need: float, min_batch: float, min_s: float | None, max_s: float | None
+) -> tuple[float, int]:
+    """Потребность с учётом серий: (сколько фасовать, сколько серий).
+
+    Не меньше минимальной партии/серии; если больше максимальной серии — несколько серий,
+    каждая не меньше минимальной.
+    """
+    need = float(max(math.ceil(raw_need), math.ceil(min_batch)))
+    if not max_s:
+        return need, 1
+    series = math.ceil(need / max_s)
+    if min_s and need < series * min_s:
+        need = float(math.ceil(series * min_s))
+    return need, series
+
+
 def _min_batch(group: str | None) -> float:
     lines = lines_in_group(group) if group else []
     return min(line.min_batch for line in lines) if lines else 0.0
@@ -153,6 +181,11 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
     quarantine_ready = add_workdays(calc_date, NFP_QUARANTINE_WORKDAYS)
 
     items = data.items[data.items["in_scope"]].copy()
+    for col in ("min_series", "max_series"):
+        if col not in items.columns:
+            items[col] = None
+    if "stm" not in items.columns:
+        items["stm"] = items["name"].map(is_stm)
     plan = data.plan[data.plan["item"].notna()]
     plan_by_item: dict[str, dict[date, float]] = {}
     for item, month, qty in plan[["item", "month", "qty"]].itertuples(index=False):
@@ -194,12 +227,13 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
         stock_gp = float(gp_stock.get(it.name, 0.0))
         orders_q = float(open_orders.get(it.name, 0.0))
         raw_need = plan_h - stock_gp - orders_q
-        mb = _min_batch(it.line_group)
-        need = 0.0 if raw_need <= 0 else float(max(math.ceil(raw_need), math.ceil(mb)))
+        min_s, max_s = _positive(it.min_series), _positive(it.max_series)
+        mb = max(_min_batch(it.line_group), min_s or 0.0)
+        need, series = (0.0, 0) if raw_need <= 0 else _series_plan(raw_need, mb, min_s, max_s)
         rows.append(
             {
                 "item": it.name,
-                "stm": is_stm(it.name),
+                "stm": bool(it.stm),
                 "abc": it.abc,
                 "line_group": it.line_group,
                 "spec": it.spec,
@@ -211,6 +245,10 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
                 "open_orders": orders_q,
                 "need": need,
                 "min_batch": round(mb, 1),
+                "min_series": min_s,
+                "max_series": max_s,
+                "series": series,
+                "series_size": math.ceil(need / series) if series else 0,
                 "stockout_month": _stockout_month(stock_gp + orders_q, p, calc_date),
             }
         )

@@ -283,3 +283,32 @@ def test_stm_goes_after_own_products_and_out_of_deficits():
     assert s["stm_items"] == 1 and s["stm_need_units"] == 10_000 and s["stm_feasible_units"] == 3_000
     assert res.nfp.empty  # прогноз СТМ не создаёт задания 1 ступени
     assert res.materials["need"].sum() == 10_000 * 1.01  # упаковка — только под наш продукт
+
+
+def test_series_min_and_max():
+    from app.planning.stage2 import _series_plan
+
+    assert _series_plan(3_000, 2_160, 5_000, 50_000) == (5_000, 1)  # меньше минимальной серии
+    assert _series_plan(120_000, 2_160, 5_000, 50_000) == (120_000, 3)  # 3 серии по 40 000
+    assert _series_plan(52_000, 2_160, 30_000, 50_000) == (60_000, 2)  # 2 серии, каждая ≥ 30 000
+    assert _series_plan(52_000, 2_160, None, None) == (52_000, 1)
+
+
+def test_series_limits_need_and_feasible():
+    data = _data(
+        items=[
+            {
+                "name": "Мята 50г",
+                "nfp": "Мята НФП",
+                "spec": "Мята 50г",
+                "min_series": 8_000,
+                "max_series": 6_000,
+            }
+        ],
+        specs=_spec("Мята 50г"),
+        plan=[("Мята 50г", date(2026, 12, 1), 10_000)],
+        stock=[_nfp(350), _box(100_000)],  # 350 кг = 7 000 пачек — меньше минимальной серии
+    )
+    r = calculate_stage2(data, Stage2Params(2, CALC)).lines.iloc[0]
+    assert r["need"] == 16_000 and r["series"] == 2 and r["series_size"] == 8_000
+    assert r["feasible"] == 0 and r["status"] == STATUS_BLOCKED

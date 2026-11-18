@@ -48,6 +48,8 @@ const METHOD: Record<string, { label: string; color: string }> = {
   fuzzy: { label: 'похожее имя — проверить', color: 'orange' },
 }
 
+const num = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+
 export default function ImportPage() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [selected, setSelected] = useState<number | null>(null)
@@ -256,6 +258,7 @@ export default function ImportPage() {
                       <Table.Th>ГП</Table.Th>
                       <Table.Th w={50}>ABC</Table.Th>
                       <Table.Th>Группа линий</Table.Th>
+                      <Table.Th ta="right">Серия, шт</Table.Th>
                       <Table.Th>НФП</Table.Th>
                       <Table.Th>Спецификация</Table.Th>
                       <Table.Th>Как найдена</Table.Th>
@@ -264,9 +267,25 @@ export default function ImportPage() {
                   <Table.Tbody>
                     {shownItems.map((i) => (
                       <Table.Tr key={i.name} opacity={i.in_scope ? 1 : 0.5}>
-                        <Table.Td>{i.name}</Table.Td>
+                        <Table.Td>
+                          {i.stm && (
+                            <Badge size="xs" color="violet" variant="filled" mr={6}>
+                              СТМ
+                            </Badge>
+                          )}
+                          {i.name}
+                        </Table.Td>
                         <Table.Td>{i.abc}</Table.Td>
                         <Table.Td>{i.line_group}</Table.Td>
+                        <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
+                          {i.min_series || i.max_series ? (
+                            `${i.min_series ? num.format(i.min_series) : '—'} – ${i.max_series ? num.format(i.max_series) : '—'}`
+                          ) : (
+                            <Text size="xs" c={i.kind === 'ЛС' && i.in_scope ? 'orange' : 'dimmed'}>
+                              не задана
+                            </Text>
+                          )}
+                        </Table.Td>
                         <Table.Td>{i.nfp ?? <Text c="red">нет</Text>}</Table.Td>
                         <Table.Td>{i.spec ?? (i.in_scope ? <Text c="red">не найдена</Text> : '—')}</Table.Td>
                         <Table.Td>
