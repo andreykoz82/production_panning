@@ -1,9 +1,11 @@
 /* Диаграмма Ганта в стиле «Графика этапов производства» 1С */
 
 .gantt-1c {
-  border: 1px solid #c8c8c8;
+  border: 1px solid var(--mantine-color-gray-3);
+  border-radius: 12px;
+  overflow: hidden;
   background: #fff;
-  font-family: Arial, 'Segoe UI', sans-serif;
+  font-family: 'Inter Variable', 'Segoe UI', sans-serif;
 }
 
 /* шкала времени */
@@ -128,10 +130,13 @@
   background: #ffe1b8;
   border-color: #d9480f;
 }
-.gantt-1c .vis-item.seg-task.locked,
-.gantt-1c .vis-item.seg-line.locked {
+.gantt-1c .vis-item.seg-task.started {
   border-width: 2px;
-  border-color: #1f3a0a;
+  border-color: #1f5f1f;
+  cursor: not-allowed;
+}
+.gantt-1c .vis-item.seg-task:not(.started) {
+  cursor: grab;
 }
 .gantt-1c .vis-item.vis-selected {
   border-color: #1c7ed6;

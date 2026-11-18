@@ -85,8 +85,10 @@ def test_calendars_and_gantt(client, data_dir):
     sync = client.post("/api/schedule/sync").json()
     assert sync["added"] == sync["total"] == sync["tasks"] > 0
     tl = client.get("/api/schedule").json()
-    task = next(t for t in tl["tasks"] if t["line_code"] and t["line_group"] == "Линия ББЛ")
-    assert tl["off"] and tl["load"]
+    task = next(
+        t for t in tl["tasks"] if t["line_code"] and t["line_group"] == "Линия ББЛ" and t["status"] != "Начат"
+    )
+    assert tl["off"] and "load" not in tl
     # остаток к выпуску; начатые в 1С этапы стоят на линии из 1С и идут первыми
     assert all(t["qty"] == t["qty_plan"] - t["qty_done"] for t in tl["tasks"])
     started = [t for t in tl["tasks"] if t["status"] == "Начат"]
@@ -98,20 +100,45 @@ def test_calendars_and_gantt(client, data_dir):
     statuses = [t["status"] for t in bbl]
     assert statuses == sorted(statuses, key=lambda s: s != "Начат")
 
-    # выбор линии закрепляет только линию, время считается автоматически
+    # выбор линии закрепляет линию, время считается автоматически
     other = "BBL-1" if task["line_code"] != "BBL-1" else "BBL-2"
     r = client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": other, "pin_line": True})
     assert r.status_code == 200
     moved = next(t for t in client.get("/api/schedule").json()["tasks"] if t["id"] == task["id"])
-    assert moved["line_code"] == other and moved["line_locked"] and not moved["locked"]
-    # перетаскивание фиксирует и время
-    start = moved["start"]
-    client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": other, "start": start})
-    moved = next(t for t in client.get("/api/schedule").json()["tasks"] if t["id"] == task["id"])
-    assert moved["locked"] and moved["start"] == start
+    assert moved["line_code"] == other and moved["line_locked"]
     # на линию другой группы — нельзя
     bad = client.patch(f"/api/schedule/tasks/{task['id']}", json={"line_code": "IMA C51", "pin_line": True})
     assert bad.status_code == 422
+    # начатый этап не двигается
+    run = started[0]
+    assert client.patch(f"/api/schedule/tasks/{run['id']}", json={"pin_line": False}).status_code == 422
+    assert (
+        client.put("/api/schedule/queues", json={"queues": {run["line_code"]: [run["id"]]}}).status_code
+        == 422
+    )
+
+    # ручная очередь линии: переставляем два незапущенных заказа местами
+    tasks = client.get("/api/schedule").json()["tasks"]
+    line = next(
+        code
+        for code in {t["line_code"] for t in tasks}
+        if sum(1 for t in tasks if t["line_code"] == code and t["status"] != "Начат") >= 2
+    )
+    queue = sorted(
+        (t for t in tasks if t["line_code"] == line and t["status"] != "Начат"), key=lambda t: t["start"]
+    )
+    new_order = [queue[1]["id"], queue[0]["id"]] + [t["id"] for t in queue[2:]]
+    assert client.put("/api/schedule/queues", json={"queues": {line: new_order}}).status_code == 200
+    tasks = client.get("/api/schedule").json()["tasks"]
+    on_line = sorted((t for t in tasks if t["line_code"] == line), key=lambda t: t["start"])
+    assert [t["id"] for t in on_line if t["status"] != "Начат"][:2] == new_order[:2]
+    assert [t["status"] == "Начат" for t in on_line] == sorted(
+        (t["status"] == "Начат" for t in on_line), reverse=True
+    )  # начатые — впереди
+    assert all(t["seq"] == i for i, t in enumerate(t for t in on_line if t["status"] != "Начат"))
+    assert client.delete(f"/api/schedule/queues/{line}").status_code == 200
+    tasks = client.get("/api/schedule").json()["tasks"]
+    assert all(t["seq"] is None for t in tasks)
 
     # календарь: шаблон 24/7 и правка дня
     assert (
@@ -160,3 +187,20 @@ def test_warehouse_roles(client, data_dir):
     )
     assert w["role"] == "materials" and not w["manual"]
     assert client.put("/api/warehouses", json={"warehouse": "X", "role": "nonsense"}).status_code == 422
+
+
+def test_capacity_summary(client):
+    from datetime import date, timedelta
+
+    from app.planning.calendar import workdays_in_month
+
+    nxt = (date.today().replace(day=1) + timedelta(days=32)).replace(day=1)
+    data = client.get("/api/calendars/capacity", params={"month": f"{nxt:%Y-%m}", "months": 2}).json()
+    assert data["months"][0] == nxt.isoformat() and len(data["months"]) == 2
+    bbl = next(g for g in data["groups"] if g["group"] == "Линия ББЛ")
+    assert bbl["unit"] == "шт" and len(bbl["lines"]) == 3
+    # по умолчанию 5/2, одна смена (8 ч) на трёх линиях; 17 283 шт за смену на линию
+    days = workdays_in_month(nxt)
+    assert bbl["months"][0]["hours"] == days * 8 * 3 and bbl["months"][0]["output"] == days * 3 * 17283
+    assert bbl["total"] == sum(m["output"] for m in bbl["months"])
+    assert any(g["unit"] == "кг" for g in data["groups"])

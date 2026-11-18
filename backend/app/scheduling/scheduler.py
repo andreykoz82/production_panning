@@ -3,19 +3,21 @@
 Время делится на слоты по 15 минут. Заказ занимает непрерывную цепочку рабочих слотов линии:
 на ночь и выходные он «замирает», но другой заказ в его середину не встаёт.
 
-Правила:
-- Длительность = количество / производительность линии в час + 1 ч переналадки,
-  если перед заказом на этой линии стоял другой продукт (или ничего).
-- Заказ ставится только на линии своей группы; выбирается линия, где он раньше закончится.
-- Зафиксированные заказы (перетащенные вручную) остаются на месте, остальные расставляются
-  вокруг них по приоритету.
+Очередь на каждой линии собирается так:
+1. Начатые в 1С этапы — первыми, в порядке фактического начала; их место не меняется.
+2. Очередь, заданная планировщиком вручную (seq) — на своей линии, в заданном порядке.
+3. Остальные — по приоритету (месяц, когда кончится запас ГП), на линию своей группы,
+   где заказ раньше закончится; закреплённые за линией — только на неё.
+
+Длительность = количество / производительность линии в час + 1 ч переналадки, если перед заказом
+на этой линии стоял другой продукт (или ничего; начатый этап, стоящий первым, — без переналадки).
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -36,9 +38,9 @@ class Task:
     priority: float = math.inf
     line_code: str | None = None
     start: datetime | None = None
-    locked: bool = False  # зафиксированы время и линия
-    line_locked: bool = False  # зафиксирована только линия, время — автоматически
-    in_progress: bool = False  # этап уже идёт на линии: первым на ней — без переналадки
+    line_locked: bool = False  # линия закреплена вручную (или начатый этап — линия из 1С)
+    seq: int | None = None  # место в ручной очереди линии
+    in_progress: bool = False  # этап начат в 1С: стоит первым, без переналадки
     # результат
     end: datetime | None = None
     changeover: bool = False
@@ -126,29 +128,14 @@ def schedule(
         t.warnings = []
         t.end = None
 
-    # 1. Зафиксированные — на своих местах
-    for t in sorted((t for t in tasks if t.locked and t.line_code and t.start), key=lambda t: t.start):
-        line = next((ln for ln in lines_in_group(t.group) if ln.code == t.line_code), None)
-        if line is None:
-            t.locked = False
-            t.warnings.append("Линия не из группы этого продукта — заказ расставлен заново")
-            continue
-        st = state(line)
-        pos = st.first_working_at(t.start)
-        changeover = _needs_changeover(t, st.item_before(pos))
-        need = _slots_for(t, line, changeover)
-        if pos + need > len(st.working_idx):
-            t.warnings.append(f"Не помещается в горизонт {horizon_days} дней")
-            continue
-        if st.busy[pos : pos + need].any():
-            t.warnings.append("Пересекается с другим зафиксированным заказом")
-        st.occupy(pos, need, t.key, t.item)
-        t.start, t.end = st.span(pos, need)
-        t.changeover = changeover
+    def order(t: Task):
+        if t.in_progress:
+            return (0, t.priority, 0, t.key)
+        if t.seq is not None and t.line_locked:
+            return (1, 0, t.seq, t.key)
+        return (2, t.priority, 0, t.key)
 
-    # 2. Остальные — по приоритету, на линию группы, где закончится раньше
-    placed_locked = {id(t) for t in tasks if t.locked and t.end is not None}
-    for t in sorted((t for t in tasks if id(t) not in placed_locked), key=lambda t: (t.priority, t.key)):
+    for t in sorted(tasks, key=order):
         lines = lines_in_group(t.group)
         if not lines:
             t.warnings.append(f"Неизвестная группа линий «{t.group}»")
@@ -172,7 +159,6 @@ def schedule(
             end = st.time_of(st.working_idx[pos + need - 1] + 1)
             if best is None or end < best[0]:
                 best = (end, line, pos, need, changeover)
-        t.locked = False
         if best is None:
             t.start, t.end = None, None
             if not t.line_locked:
@@ -187,42 +173,3 @@ def schedule(
         t.changeover = changeover
         _slots_for(t, line, changeover)  # часы в задаче — по фактической переналадке
     return tasks
-
-
-def week_load(
-    tasks: list[Task],
-    calendars: dict[str, LineCalendar],
-    line_codes: list[str],
-    first_day: date,
-    weeks: int,
-) -> list[dict]:
-    """Загрузка линий по неделям: часы заказов / рабочие часы календаря."""
-    monday = first_day - timedelta(days=first_day.weekday())
-    rows = []
-    for code in line_codes:
-        cal = calendars.get(code, LineCalendar())
-        for w in range(weeks):
-            ws = datetime.combine(monday + timedelta(weeks=w), datetime.min.time())
-            we = ws + timedelta(weeks=1)
-            avail = busy = 0.0
-            for d in range(7):
-                for a, b in cal.working_intervals((ws + timedelta(days=d)).date()):
-                    avail += (b - a).total_seconds() / 3600
-                    for t in tasks:
-                        if t.line_code == code and t.start and t.end:
-                            lo, hi = max(a, t.start), min(b, t.end)
-                            if hi > lo:
-                                busy += (hi - lo).total_seconds() / 3600
-            rows.append(
-                {
-                    "line_code": code,
-                    "week_start": ws.date(),
-                    "available_hours": avail,
-                    "busy_hours": round(busy, 2),
-                    "load": round(busy / avail, 3) if avail else None,
-                    "_end": we,
-                }
-            )
-    for r in rows:
-        r.pop("_end")
-    return rows

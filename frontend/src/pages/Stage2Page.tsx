@@ -2,7 +2,6 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
   Group,
   NumberInput,
   SegmentedControl,
@@ -13,11 +12,21 @@ import {
   Tabs,
   Text,
   TextInput,
-  Title,
 } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import {
+  IconAlertTriangle,
+  IconBox,
+  IconCalculator,
+  IconClipboardList,
+  IconDownload,
+  IconLeaf,
+  IconPackages,
+} from '@tabler/icons-react'
+
 import { planningApi, type PlanRun, type PlanRunDetail, type Stage2Status } from '../api'
+import { PageHeader, Section, StatCard } from '../ui'
 
 const num = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const kg = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -42,24 +51,6 @@ const STATUS_COLOR: Record<Stage2Status, string> = {
   Нельзя: 'red',
   'Нет данных': 'gray',
   'Не требуется': 'gray',
-}
-
-function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
-  return (
-    <Card withBorder padding="md">
-      <Text size="sm" c="dimmed">
-        {label}
-      </Text>
-      <Text size="xl" fw={700}>
-        {value}
-      </Text>
-      {hint && (
-        <Text size="xs" c="dimmed">
-          {hint}
-        </Text>
-      )}
-    </Card>
-  )
 }
 
 export default function Stage2Page() {
@@ -108,45 +99,58 @@ export default function Stage2Page() {
 
   return (
     <Stack>
-      <div>
-        <Title order={3}>Потребность 2 ступени</Title>
-        <Text c="dimmed" size="sm">
-          Сколько фасовать, чтобы обеспечить план продаж на N месяцев: план − запас ГП (склад ГП + опт) − открытые
-          заказы, не меньше выпуска линии за 1 ч. Из текущего месяца — оставшиеся рабочие дни.
-        </Text>
-      </div>
+      <PageHeader
+        title="Потребность 2 ступени"
+        icon={<IconClipboardList size={24} />}
+        description="Сколько фасовать, чтобы обеспечить план продаж на N месяцев: план − запас ГП (склад ГП + опт) − открытые заказы, не меньше выпуска линии за 1 ч. Из текущего месяца — оставшиеся рабочие дни."
+        actions={
+          run && (
+            <Button
+              component="a"
+              href={planningApi.exportUrl(run.id)}
+              variant="default"
+              leftSection={<IconDownload size={16} />}
+            >
+              Excel для диспетчера
+            </Button>
+          )
+        }
+      />
 
-      <Group align="flex-end">
-        <NumberInput
-          label="Горизонт, мес."
-          min={1}
-          max={24}
-          w={140}
-          value={horizon}
-          onChange={(v) => setHorizon(Number(v) || 1)}
-        />
-        <TextInput label="Дата расчёта" type="date" w={170} value={calcDate} onChange={(e) => setCalcDate(e.currentTarget.value)} />
-        <Button loading={busy} onClick={calculate}>
-          Рассчитать
-        </Button>
-        {runs.length > 0 && (
-          <Select
-            label="Расчёт"
-            w={330}
-            value={run?.id.toString() ?? null}
-            onChange={(v) => v && planningApi.run(Number(v)).then(setRun)}
-            data={runs.map((r) => ({
-              value: r.id.toString(),
-              label: `#${r.id}: на ${r.params.horizon_months} мес. от ${dmy(r.params.calc_date)} (снимок #${r.snapshot_id})`,
-            }))}
+      <Section>
+        <Group align="flex-end">
+          <NumberInput
+            label="Горизонт, мес."
+            min={1}
+            max={24}
+            w={140}
+            value={horizon}
+            onChange={(v) => setHorizon(Number(v) || 1)}
           />
-        )}
-        {run && (
-          <Button component="a" href={planningApi.exportUrl(run.id)} variant="light">
-            Скачать Excel для диспетчера
+          <TextInput
+            label="Дата расчёта"
+            type="date"
+            w={170}
+            value={calcDate}
+            onChange={(e) => setCalcDate(e.currentTarget.value)}
+          />
+          <Button loading={busy} onClick={calculate} leftSection={<IconCalculator size={16} />}>
+            Рассчитать
           </Button>
-        )}
-      </Group>
+          {runs.length > 0 && (
+            <Select
+              label="Расчёт"
+              w={330}
+              value={run?.id.toString() ?? null}
+              onChange={(v) => v && planningApi.run(Number(v)).then(setRun)}
+              data={runs.map((r) => ({
+                value: r.id.toString(),
+                label: `#${r.id}: на ${r.params.horizon_months} мес. от ${dmy(r.params.calc_date)} (снимок #${r.snapshot_id})`,
+              }))}
+            />
+          )}
+        </Group>
+      </Section>
 
       {error && (
         <Alert color="red" title="Не удалось рассчитать">
@@ -158,23 +162,34 @@ export default function Stage2Page() {
       {run && s && (
         <>
           <SimpleGrid cols={{ base: 2, md: 4 }}>
-            <Stat
+            <StatCard
+              icon={<IconPackages size={20} />}
               label="Позиций к фасовке"
               value={`${s.items_needed} из ${s.items}`}
               hint={`полностью ${s.items_full}, частично ${s.items_partial}, нельзя ${s.items_blocked}`}
             />
-            <Stat
+            <StatCard
+              icon={<IconBox size={20} />}
+              color="blue"
               label="Потребность, шт"
               value={num.format(s.need_units)}
               hint={`можно выпустить сейчас ${num.format(s.feasible_units)}`}
             />
-            <Stat label="Материалов в дефиците" value={s.materials_short} />
-            <Stat
+            <StatCard
+              icon={<IconAlertTriangle size={20} />}
+              color={s.materials_short ? 'red' : 'brand'}
+              label="Материалов в дефиците"
+              value={s.materials_short}
+              hint="нехватка до 10 % — не дефицит"
+            />
+            <StatCard
+              icon={<IconLeaf size={20} />}
+              color="orange"
               label="Выпустить НФП на 1 ступени"
-              value={`${kg.format(s.nfp_shortage_kg)} кг`}
+              value={`${num.format(s.nfp_shortage_kg)} кг`}
               hint={
                 s.nfp_uncovered_kg != null
-                  ? `в заказах 1 ступени ${kg.format(s.nfp_stage1_orders_kg ?? 0)}, не покрыто ${kg.format(s.nfp_uncovered_kg)}`
+                  ? `в заказах 1 ступени ${num.format(s.nfp_stage1_orders_kg ?? 0)}, не покрыто ${num.format(s.nfp_uncovered_kg)}`
                   : 'с учётом карантина'
               }
             />
@@ -196,9 +211,15 @@ export default function Stage2Page() {
 
           <Tabs defaultValue="items">
             <Tabs.List>
-              <Tabs.Tab value="items">Что фасовать</Tabs.Tab>
-              <Tabs.Tab value="materials">Дефицит материалов ({s.materials_short})</Tabs.Tab>
-              <Tabs.Tab value="nfp">Дефицит НФП ({run.nfp.length})</Tabs.Tab>
+              <Tabs.Tab value="items" leftSection={<IconPackages size={16} />}>
+                Что фасовать
+              </Tabs.Tab>
+              <Tabs.Tab value="materials" leftSection={<IconBox size={16} />}>
+                Дефицит материалов ({s.materials_short})
+              </Tabs.Tab>
+              <Tabs.Tab value="nfp" leftSection={<IconLeaf size={16} />}>
+                Дефицит НФП ({run.nfp.length})
+              </Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="items" pt="md">
@@ -211,146 +232,166 @@ export default function Stage2Page() {
                     { value: 'all', label: `Все (${s.items})` },
                   ]}
                 />
-                <TextInput placeholder="Поиск по ГП или НФП" value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={320} />
+                <TextInput
+                  placeholder="Поиск по ГП или НФП"
+                  value={search}
+                  onChange={(e) => setSearch(e.currentTarget.value)}
+                  w={320}
+                />
               </Group>
-              <Table striped highlightOnHover fz="sm">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>№</Table.Th>
-                    <Table.Th>ГП</Table.Th>
-                    <Table.Th>ABC</Table.Th>
-                    <Table.Th>Кончится</Table.Th>
-                    <Table.Th ta="right">План на горизонт</Table.Th>
-                    <Table.Th ta="right">Запас ГП</Table.Th>
-                    <Table.Th ta="right">Заказы</Table.Th>
-                    <Table.Th ta="right">Потребность</Table.Th>
-                    <Table.Th ta="right">Можно сейчас</Table.Th>
-                    <Table.Th w={150}>Статус</Table.Th>
-                    <Table.Th>Что ограничивает</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {lines.map((l) => (
-                    <Table.Tr key={l.item}>
-                      <Table.Td>{l.priority}</Table.Td>
-                      <Table.Td>
-                        <Text size="sm">{l.item}</Text>
-                        <Text size="xs" c="dimmed">
-                          {l.line_group}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>{l.abc}</Table.Td>
-                      <Table.Td>{month(l.stockout_month)}</Table.Td>
-                      <Table.Td ta="right">{num.format(l.plan_horizon)}</Table.Td>
-                      <Table.Td ta="right">{num.format(l.gp_stock)}</Table.Td>
-                      <Table.Td ta="right">{num.format(l.open_orders)}</Table.Td>
-                      <Table.Td ta="right" fw={600}>
-                        {num.format(l.need)}
-                      </Table.Td>
-                      <Table.Td ta="right">{num.format(l.feasible)}</Table.Td>
-                      <Table.Td>
-                        <Badge variant="light" color={STATUS_COLOR[l.status]}>
-                          {l.status}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        {l.limit === 'НФП' ? (
-                          <Text size="sm">
-                            НФП: есть {kg.format(l.nfp_available_kg)} из {kg.format(l.nfp_need_kg)} кг
-                            {l.nfp_quarantine_kg > 0 && `, на карантине ${kg.format(l.nfp_quarantine_kg)}`}
-                          </Text>
-                        ) : (
-                          <Text size="sm">{l.limit ?? ''}</Text>
-                        )}
-                      </Table.Td>
+              <Section p={0}>
+                <Table fz="sm" stickyHeader>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>№</Table.Th>
+                      <Table.Th>ГП</Table.Th>
+                      <Table.Th>ABC</Table.Th>
+                      <Table.Th>Кончится</Table.Th>
+                      <Table.Th ta="right">План на горизонт</Table.Th>
+                      <Table.Th ta="right">Запас ГП</Table.Th>
+                      <Table.Th ta="right">Заказы</Table.Th>
+                      <Table.Th ta="right">Потребность</Table.Th>
+                      <Table.Th ta="right">Можно сейчас</Table.Th>
+                      <Table.Th w={150}>Статус</Table.Th>
+                      <Table.Th>Что ограничивает</Table.Th>
                     </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Tabs.Panel>
-
-            <Tabs.Panel value="materials" pt="md">
-              <Table striped fz="sm">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Материал</Table.Th>
-                    <Table.Th ta="right">Нужно</Table.Th>
-                    <Table.Th ta="right">На складе</Table.Th>
-                    <Table.Th ta="right">Дефицит</Table.Th>
-                    <Table.Th>Для каких ГП</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {run.materials
-                    .filter((m) => m.shortage > 0)
-                    .map((m) => (
-                      <Table.Tr key={m.material}>
-                        <Table.Td>{m.material}</Table.Td>
-                        <Table.Td ta="right">{kg.format(m.need)}</Table.Td>
-                        <Table.Td ta="right">{kg.format(m.available)}</Table.Td>
-                        <Table.Td ta="right" c="red" fw={600}>
-                          {kg.format(m.shortage)}
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {lines.map((l) => (
+                      <Table.Tr key={l.item}>
+                        <Table.Td>{l.priority}</Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{l.item}</Text>
+                          <Text size="xs" c="dimmed">
+                            {l.line_group}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>{l.abc}</Table.Td>
+                        <Table.Td>{month(l.stockout_month)}</Table.Td>
+                        <Table.Td ta="right">{num.format(l.plan_horizon)}</Table.Td>
+                        <Table.Td ta="right">{num.format(l.gp_stock)}</Table.Td>
+                        <Table.Td ta="right">{num.format(l.open_orders)}</Table.Td>
+                        <Table.Td ta="right" fw={600}>
+                          {num.format(l.need)}
+                        </Table.Td>
+                        <Table.Td ta="right">{num.format(l.feasible)}</Table.Td>
+                        <Table.Td>
+                          <Badge variant="light" color={STATUS_COLOR[l.status]}>
+                            {l.status}
+                          </Badge>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs">{m.item_names}</Text>
+                          {l.limit === 'НФП' ? (
+                            <Text size="sm">
+                              НФП: есть {kg.format(l.nfp_available_kg)} из {kg.format(l.nfp_need_kg)} кг
+                              {l.nfp_quarantine_kg > 0 && `, на карантине ${kg.format(l.nfp_quarantine_kg)}`}
+                            </Text>
+                          ) : (
+                            <Text size="sm">{l.limit ?? ''}</Text>
+                          )}
                         </Table.Td>
                       </Table.Tr>
                     ))}
-                </Table.Tbody>
-              </Table>
+                  </Table.Tbody>
+                </Table>
+              </Section>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="materials" pt="md">
+              <Section p={0}>
+                <Table fz="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Материал</Table.Th>
+                      <Table.Th ta="right">Нужно</Table.Th>
+                      <Table.Th ta="right">На складе</Table.Th>
+                      <Table.Th ta="right">Дефицит</Table.Th>
+                      <Table.Th ta="right">Не хватает</Table.Th>
+                      <Table.Th>Для каких ГП</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {run.materials
+                      .filter((m) => m.shortage > 0 || m.within_tolerance)
+                      .map((m) => (
+                        <Table.Tr key={m.material} opacity={m.within_tolerance ? 0.75 : 1}>
+                          <Table.Td>
+                            {m.material}
+                            {m.within_tolerance && (
+                              <Badge ml="xs" size="xs" color="gray">
+                                в пределах 10 %
+                              </Badge>
+                            )}
+                          </Table.Td>
+                          <Table.Td ta="right">{kg.format(m.need)}</Table.Td>
+                          <Table.Td ta="right">{kg.format(m.available)}</Table.Td>
+                          <Table.Td ta="right" c={m.shortage > 0 ? 'red' : 'dimmed'} fw={600}>
+                            {m.shortage > 0 ? kg.format(m.shortage) : '—'}
+                          </Table.Td>
+                          <Table.Td ta="right">{m.deviation_pct != null ? `${m.deviation_pct}%` : ''}</Table.Td>
+                          <Table.Td>
+                            <Text size="xs">{m.item_names}</Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                  </Table.Tbody>
+                </Table>
+              </Section>
             </Tabs.Panel>
 
             <Tabs.Panel value="nfp" pt="md">
               <Text size="sm" c="dimmed" mb="sm">
-                Что выпустить на 1 ступени: потребность в НФП минус доступный НФП и НФП на карантине (5 рабочих дней).
-                Открытые заказы 1 ступени той же фракции уменьшают «Не покрыто».
+                Что выпустить на 1 ступени: потребность в НФП минус доступный НФП и НФП на карантине (5 рабочих дней),
+                округлено до 100 кг. Открытые заказы 1 ступени той же фракции уменьшают «Не покрыто».
               </Text>
-              <Table striped fz="sm">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>НФП</Table.Th>
-                    <Table.Th>Фракция / назначение</Table.Th>
-                    <Table.Th ta="right">Нужно, кг</Table.Th>
-                    <Table.Th ta="right">Доступно</Table.Th>
-                    <Table.Th ta="right">Карантин</Table.Th>
-                    <Table.Th ta="right">Выпустить, кг</Table.Th>
-                    <Table.Th ta="right">В заказах 1 ст.</Table.Th>
-                    <Table.Th ta="right">Не покрыто</Table.Th>
-                    <Table.Th>Для каких ГП</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {run.nfp.map((n) => (
-                    <Table.Tr key={`${n.nfp}|${n.characteristic}|${n.purpose}`}>
-                      <Table.Td>{n.nfp}</Table.Td>
-                      <Table.Td>
-                        <Text size="sm">{n.characteristic}</Text>
-                        <Text size="xs" c="dimmed">
-                          {n.purpose}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td ta="right">{kg.format(n.need_kg)}</Table.Td>
-                      <Table.Td ta="right">{kg.format(n.available_kg)}</Table.Td>
-                      <Table.Td ta="right">
-                        {kg.format(n.quarantine_kg)}
-                        {n.quarantine_ready && (
-                          <Text size="xs" c="dimmed">
-                            до {dmy(n.quarantine_ready)}
-                          </Text>
-                        )}
-                      </Table.Td>
-                      <Table.Td ta="right">{kg.format(n.shortage_kg)}</Table.Td>
-                      <Table.Td ta="right">{kg.format(n.stage1_orders_kg ?? 0)}</Table.Td>
-                      <Table.Td ta="right" fw={600} c={(n.uncovered_kg ?? n.shortage_kg) > 0 ? 'red' : undefined}>
-                        {kg.format(n.uncovered_kg ?? n.shortage_kg)}
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="xs">{n.items}</Text>
-                      </Table.Td>
+              <Section p={0}>
+                <Table fz="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>НФП</Table.Th>
+                      <Table.Th>Фракция / назначение</Table.Th>
+                      <Table.Th ta="right">Нужно, кг</Table.Th>
+                      <Table.Th ta="right">Доступно</Table.Th>
+                      <Table.Th ta="right">Карантин</Table.Th>
+                      <Table.Th ta="right">Выпустить, кг</Table.Th>
+                      <Table.Th ta="right">В заказах 1 ст.</Table.Th>
+                      <Table.Th ta="right">Не покрыто</Table.Th>
+                      <Table.Th>Для каких ГП</Table.Th>
                     </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {run.nfp.map((n) => (
+                      <Table.Tr key={`${n.nfp}|${n.characteristic}|${n.purpose}`}>
+                        <Table.Td>{n.nfp}</Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{n.characteristic}</Text>
+                          <Text size="xs" c="dimmed">
+                            {n.purpose}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td ta="right">{kg.format(n.need_kg)}</Table.Td>
+                        <Table.Td ta="right">{kg.format(n.available_kg)}</Table.Td>
+                        <Table.Td ta="right">
+                          {kg.format(n.quarantine_kg)}
+                          {n.quarantine_ready && (
+                            <Text size="xs" c="dimmed">
+                              до {dmy(n.quarantine_ready)}
+                            </Text>
+                          )}
+                        </Table.Td>
+                        <Table.Td ta="right">{num.format(n.shortage_kg)}</Table.Td>
+                        <Table.Td ta="right">{num.format(n.stage1_orders_kg ?? 0)}</Table.Td>
+                        <Table.Td ta="right" fw={600} c={(n.uncovered_kg ?? n.shortage_kg) > 0 ? 'red' : undefined}>
+                          {num.format(n.uncovered_kg ?? n.shortage_kg)}
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs">{n.items}</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Section>
             </Tabs.Panel>
           </Tabs>
         </>

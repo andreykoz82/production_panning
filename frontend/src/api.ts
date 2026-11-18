@@ -111,6 +111,8 @@ export interface MaterialLine {
   shortage: number
   items: number
   item_names: string
+  deviation_pct?: number
+  within_tolerance?: boolean
 }
 
 export interface NfpLine {
@@ -180,6 +182,7 @@ export interface CalendarDay {
 }
 
 export interface CalendarLine {
+  title?: string
   line_code: string
   stage: number
   group: string
@@ -206,8 +209,9 @@ export interface ScheduleTask {
   end: string | null
   hours: number
   changeover: boolean
-  locked: boolean
   line_locked: boolean
+  seq: number | null
+  stockout_month: string | null
   available_from: string | null
   warnings: string[]
   status: string | null
@@ -221,7 +225,25 @@ export interface Schedule {
   lines: { code: string; title?: string; group: string; per_hour: number }[]
   tasks: ScheduleTask[]
   off: { line_code: string; start: string; end: string }[]
-  load: { line_code: string; week_start: string; available_hours: number; busy_hours: number; load: number | null }[]
+}
+
+export interface CapacityGroup {
+  group: string
+  stage: number
+  unit: string
+  lines: string[]
+  months: { month: string; hours: number; output: number }[]
+  total_hours: number
+  total: number
+  need: number | null
+  open_orders: number | null
+}
+
+export interface Capacity {
+  months: string[]
+  from: string
+  horizon_months: number | null
+  groups: CapacityGroup[]
 }
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -241,10 +263,17 @@ export const scheduleApi = {
       method: 'DELETE',
     }),
   schedule: (from: string, to: string) => request<Schedule>(`/api/schedule?from=${from}&to=${to}`),
-  sync: () => request<{ added: number; updated: number; removed: number; total: number }>('/api/schedule/sync', { method: 'POST' }),
+  sync: () =>
+    request<{ added: number; updated: number; removed: number; total: number }>('/api/schedule/sync', {
+      method: 'POST',
+    }),
   replan: () => request('/api/schedule/replan', { method: 'POST' }),
-  patchTask: (id: number, patch: { line_code?: string; start?: string; locked?: boolean; pin_line?: boolean }) =>
+  patchTask: (id: number, patch: { line_code?: string; pin_line?: boolean }) =>
     request(`/api/schedule/tasks/${id}`, json('PATCH', patch)),
+  setQueues: (queues: Record<string, number[]>) => request('/api/schedule/queues', json('PUT', { queues })),
+  resetQueue: (line_code: string) =>
+    request(`/api/schedule/queues/${encodeURIComponent(line_code)}`, { method: 'DELETE' }),
+  capacity: (month: string, months = 3) => request<Capacity>(`/api/calendars/capacity?month=${month}&months=${months}`),
 }
 
 export interface WarehouseInfo {
