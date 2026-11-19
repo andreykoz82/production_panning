@@ -251,3 +251,14 @@ def test_shelf_life_analysis(client, data_dir):
         "summary"
     ]
     assert low["illiquid_forecast"] >= full["illiquid_forecast"]
+    # СТМ в анализ не входит; розлив — по переключателю
+    names = [i["item"] for i in data["items"]]
+    assert not any("Будь здоров" in n for n in names)
+    assert all(
+        a["illiquid_total"] >= b["illiquid_total"]
+        for a, b in zip(data["items"], data["items"][1:], strict=False)
+    )
+    bottling = [i["item"] for i in data["items"] if i["bottling"]]
+    assert any("Стоматофит" in n for n in bottling) and s["items_bottling"] == len(bottling)
+    off = client.get("/api/shelf-life", params={"bottling": False}).json()
+    assert not any(i["bottling"] for i in off["items"]) and off["summary"]["stock"] < s["stock"]

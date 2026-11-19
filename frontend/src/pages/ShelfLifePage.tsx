@@ -24,9 +24,12 @@ import { useDebouncedValue } from '@mantine/hooks'
 import {
   IconAlertTriangle,
   IconBuildingFactory2,
+  IconChevronDown,
+  IconChevronUp,
   IconHourglass,
   IconHourglassLow,
   IconPackages,
+  IconSelector,
   IconShoppingCartOff,
 } from '@tabler/icons-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -54,7 +57,23 @@ const DEFAULTS: ShelfParams = {
   threshold_pct: 70,
   replenish: true,
   cover_months: 3,
+  bottling: true,
 }
+
+type SortKey =
+  | 'item'
+  | 'shelf_life_months'
+  | 'stock'
+  | 'monthly_demand'
+  | 'coverage_months'
+  | 'illiquid_now'
+  | 'illiquid_forecast'
+  | 'illiquid_total'
+  | 'produced'
+  | 'lost_sales'
+
+const sortValue = (i: ShelfItem, key: SortKey): number | string =>
+  key === 'produced' ? i.produced_orders + i.produced_planned : (i[key] ?? -1)
 
 export default function ShelfLifePage() {
   const [params, setParams] = useState<ShelfParams>(DEFAULTS)
@@ -65,6 +84,7 @@ export default function ShelfLifePage() {
   const [statuses, setStatuses] = useState<ShelfStatus[]>([])
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'illiquid_total', desc: true })
 
   useEffect(() => {
     setLoading(true)
@@ -87,10 +107,25 @@ export default function ShelfLifePage() {
   }, [data])
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return (data?.items ?? []).filter(
-      (i) => (!statuses.length || statuses.includes(i.status)) && (!q || i.item.toLowerCase().includes(q)),
-    )
-  }, [data, statuses, search])
+    const dir = sort.desc ? -1 : 1
+    return (data?.items ?? [])
+      .filter((i) => (!statuses.length || statuses.includes(i.status)) && (!q || i.item.toLowerCase().includes(q)))
+      .sort((a, b) => {
+        const va = sortValue(a, sort.key)
+        const vb = sortValue(b, sort.key)
+        const c = typeof va === 'string' ? va.localeCompare(String(vb), 'ru') : va - (vb as number)
+        return c * dir || b.illiquid_total - a.illiquid_total || a.item.localeCompare(b.item, 'ru')
+      })
+  }, [data, statuses, search, sort])
+  const th = (key: SortKey, label: string, right = true) => (
+    <SortTh
+      label={label}
+      right={right}
+      active={sort.key === key}
+      desc={sort.desc}
+      onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== 'item' }))}
+    />
+  )
 
   const chart = useMemo(
     () =>
@@ -113,7 +148,7 @@ export default function ShelfLifePage() {
       <PageHeader
         title="Сроки годности ГП"
         icon={<IconHourglass size={24} />}
-        description="Что успеем продать, а что уйдёт в неликвид. Запас — по сериям со склада ГП и опта; продажи — план × процент выполнения, сначала серии с меньшим сроком годности (FEFO); серия становится неликвидной, когда остаточный срок годности опускается ниже порога. Учитываются открытые этапы (по графику, с сертификацией) и будущая наработка."
+        description="Что успеем продать, а что уйдёт в неликвид. Запас — по сериям со склада ГП и опта; продажи — план × процент выполнения, сначала серии с меньшим сроком годности (FEFO); серия становится неликвидной, когда остаточный срок годности опускается ниже порога. Учитываются открытые этапы (по графику, с сертификацией) и будущая наработка. СТМ не входит в анализ — производится только по письму клиента."
       />
 
       <Section>
@@ -169,12 +204,21 @@ export default function ShelfLifePage() {
               </Text>
             </Group>
           </Stack>
+          <Switch
+            label="Учитывать розлив"
+            description="Стоматофит, Бронхофитол, НЮДА"
+            checked={params.bottling}
+            onChange={(e) => set('bottling', e.currentTarget.checked)}
+          />
           {loading && <Loader size="sm" />}
         </Group>
         {data?.report_date && (
           <Text size="xs" c="dimmed" mt="sm">
-            Остатки по сериям на {dmy(data.report_date)} · {s?.lots} серий в планировании
-            {s?.lots_out_of_scope ? ` · ${s.lots_out_of_scope} серий вне планирования (розлив, образцы)` : ''}
+            Остатки по сериям на {dmy(data.report_date)} · {s?.lots} серий в анализе
+            {s?.items_bottling ? ` · розлив: ${s.items_bottling} поз.` : ''}
+            {s?.lots_out_of_scope
+              ? ` · ${s.lots_out_of_scope} серий не учитываются (СТМ, экспериментальные, образцы${params.bottling ? '' : ', розлив'})`
+              : ''}
           </Text>
         )}
       </Section>
@@ -287,15 +331,16 @@ export default function ShelfLifePage() {
           <Table fz="sm">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>ГП</Table.Th>
-                <Table.Th ta="right">Срок годн., мес</Table.Th>
-                <Table.Th ta="right">Запас</Table.Th>
-                <Table.Th ta="right">Продажи в мес.</Table.Th>
-                <Table.Th ta="right">Хватит, мес</Table.Th>
-                <Table.Th ta="right">Неликвид сейчас</Table.Th>
-                <Table.Th ta="right">Уйдёт в неликвид</Table.Th>
-                <Table.Th ta="right">Произведём</Table.Th>
-                <Table.Th ta="right">Не хватит</Table.Th>
+                {th('item', 'ГП', false)}
+                {th('shelf_life_months', 'Срок, мес')}
+                {th('stock', 'Запас')}
+                {th('monthly_demand', 'Продажи / мес')}
+                {th('coverage_months', 'Хватит, мес')}
+                {th('illiquid_now', 'Неликвид сейчас')}
+                {th('illiquid_forecast', 'Уйдёт в неликвид')}
+                {th('illiquid_total', 'Неликвид всего')}
+                {th('produced', 'Произведём')}
+                {th('lost_sales', 'Не хватит')}
                 <Table.Th>Статус</Table.Th>
               </Table.Tr>
             </Table.Thead>
@@ -313,13 +358,41 @@ export default function ShelfLifePage() {
   )
 }
 
+function SortTh({
+  label,
+  right,
+  active,
+  desc,
+  onClick,
+}: {
+  label: string
+  right: boolean
+  active: boolean
+  desc: boolean
+  onClick: () => void
+}) {
+  const Icon = !active ? IconSelector : desc ? IconChevronDown : IconChevronUp
+  return (
+    <Table.Th
+      ta={right ? 'right' : undefined}
+      onClick={onClick}
+      style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'normal', verticalAlign: 'bottom' }}
+    >
+      <Text span size="sm" fw={active ? 700 : 600} c={active ? undefined : 'dimmed'}>
+        {label}
+        <Icon size={13} stroke={1.8} style={{ marginLeft: 2, verticalAlign: '-2px' }} />
+      </Text>
+    </Table.Th>
+  )
+}
+
 function ItemRow({ i, onOpen }: { i: ShelfItem; onOpen: () => void }) {
   return (
     <Table.Tr style={{ cursor: 'pointer' }} onClick={onOpen}>
       <Table.Td>
-        {i.stm && (
-          <Badge size="xs" color="violet" variant="filled" mr={6}>
-            СТМ
+        {i.bottling && (
+          <Badge size="xs" color="grape" variant="light" mr={6}>
+            розлив
           </Badge>
         )}
         {i.item}
@@ -350,14 +423,19 @@ function ItemRow({ i, onOpen }: { i: ShelfItem; onOpen: () => void }) {
           '—'
         )}
       </Table.Td>
+      <Table.Td ta="right" c={i.illiquid_total ? 'red.8' : 'dimmed'} fw={i.illiquid_total ? 700 : undefined}>
+        {i.illiquid_total ? num.format(i.illiquid_total) : '—'}
+      </Table.Td>
       <Table.Td ta="right">
         {i.produced_orders + i.produced_planned ? num.format(i.produced_orders + i.produced_planned) : '—'}
       </Table.Td>
       <Table.Td ta="right" c={i.lost_sales ? 'yellow.8' : 'dimmed'}>
         {i.lost_sales ? num.format(i.lost_sales) : '—'}
       </Table.Td>
-      <Table.Td>
-        <Badge color={STATUS_COLOR[i.status]}>{i.status}</Badge>
+      <Table.Td miw={150} style={{ whiteSpace: 'nowrap' }}>
+        <Badge color={STATUS_COLOR[i.status]} styles={{ label: { overflow: 'visible' } }}>
+          {i.status}
+        </Badge>
       </Table.Td>
     </Table.Tr>
   )
@@ -422,7 +500,7 @@ function ItemDrawer({ item, params, onClose }: { item: string | null; params: Sh
           </Section>
           <Section
             title="Серии на шкале времени"
-            description="Зелёным — пока серия продаётся; бордовая черта — дата, когда остаточный срок опустится ниже порога; красным — непроданный остаток, ушедший в неликвид"
+            description="Сверху — серии с наибольшим неликвидом. Зелёным — пока серия продаётся; бордовая черта — дата, когда остаточный срок опустится ниже порога; красным — непроданный остаток, ушедший в неликвид"
           >
             <LotsTimeline lots={detail.lots} from={detail.points[0]?.date} to={detail.points.at(-1)?.date} />
           </Section>

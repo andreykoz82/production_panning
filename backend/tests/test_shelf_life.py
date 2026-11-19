@@ -71,3 +71,12 @@ def test_open_order_arrives_after_certification():
     r = simulate_item("Мята", _lots(), _plan(3_100), [order], p)
     assert r.produced_orders == 9_000
     assert round(r.lost_sales) == round(3_100 / 31 * 16)  # продаём с 17.12
+
+
+def test_is_bottling():
+    from app.reference.bottling import is_bottling
+
+    assert is_bottling("Стоматофит 50 мл") and is_bottling("Бронхофитол® плющ сироп 100 мл")
+    assert not is_bottling("Стоматофит 50 мл, Фармацвет (экспериментальный)")
+    assert not is_bottling('Сэмпл-продукт ДЧ "ФармаЦветик® для животика" 1.5г')
+    assert not is_bottling("Чага (березовый гриб) 50г")
