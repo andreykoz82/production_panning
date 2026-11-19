@@ -19,15 +19,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { scheduleApi, type CalendarLine, type CalendarMonth, type Capacity } from '../api'
 import { PageHeader, Section } from '../ui'
 
-// первая колонка календаря не уезжает при горизонтальной прокрутке
-const PINNED = {
-  position: 'sticky',
-  left: 0,
-  zIndex: 2,
-  background: 'var(--mantine-color-body)',
-  boxShadow: '1px 0 0 var(--mantine-color-gray-3)',
-} as const
-
 const num = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const monthName = (iso: string) => new Date(iso).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
 
@@ -140,7 +131,7 @@ export default function CalendarsPage() {
           }
         >
           <Box style={{ overflowX: 'auto' }}>
-            <Table fz="sm">
+            <Table fz="sm" stickyHeader={false}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Группа линий</Table.Th>
@@ -219,13 +210,11 @@ export default function CalendarsPage() {
 
       {data && (
         <Section p={0}>
-          <Box style={{ overflow: 'auto', maxHeight: 'calc(100vh - 140px)' }}>
-            <Table withColumnBorders highlightOnHover={false} fz="xs" style={{ minWidth: 1100 }} stickyHeaderOffset={0}>
+          <Box style={{ overflowX: 'auto' }}>
+            <Table withColumnBorders highlightOnHover={false} fz="xs" style={{ minWidth: 1100 }} stickyHeader={false}>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th miw={150} style={{ ...PINNED, zIndex: 4 }}>
-                    Линия
-                  </Table.Th>
+                  <Table.Th miw={150}>Линия</Table.Th>
                   <Table.Th miw={170}>Шаблон</Table.Th>
                   {data.days.map((d) => {
                     const dt = new Date(d.day)
@@ -244,7 +233,7 @@ export default function CalendarsPage() {
               <Table.Tbody>
                 {lines.map((line) => (
                   <Table.Tr key={line.line_code}>
-                    <Table.Td style={PINNED}>
+                    <Table.Td>
                       <Text size="sm" fw={600}>
                         {line.title ?? line.line_code}
                       </Text>

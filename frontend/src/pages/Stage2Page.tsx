@@ -1,6 +1,7 @@
 import {
   Alert,
   Badge,
+  Chip,
   Button,
   Group,
   NumberInput,
@@ -88,13 +89,24 @@ export default function Stage2Page() {
     }
   }
 
-  const lines = useMemo(() => {
+  const [statuses, setStatuses] = useState<Stage2Status[]>([])
+  // позиции до фильтра по статусу — для счётчиков на фильтре
+  const scoped = useMemo(() => {
     if (!run) return []
     const q = search.trim().toLowerCase()
     return run.lines.filter(
       (l) => !l.stm && (scope === 'all' || l.need > 0) && (!q || `${l.item} ${l.nfp ?? ''}`.toLowerCase().includes(q)),
     )
   }, [run, scope, search])
+  const lines = useMemo(
+    () => (statuses.length ? scoped.filter((l) => statuses.includes(l.status)) : scoped),
+    [scoped, statuses],
+  )
+  const statusCounts = useMemo(() => {
+    const c = new Map<Stage2Status, number>()
+    for (const l of scoped) c.set(l.status, (c.get(l.status) ?? 0) + 1)
+    return c
+  }, [scoped])
   const [matScope, setMatScope] = useState<'short' | 'all'>('short')
   const materialGroups = useMemo(() => {
     if (!run) return [] as [string, MaterialLine[]][]
@@ -259,6 +271,25 @@ export default function Stage2Page() {
                   onChange={(e) => setSearch(e.currentTarget.value)}
                   w={320}
                 />
+              </Group>
+              <Group mb="sm" gap="xs">
+                <Text size="sm" c="dimmed">
+                  Статус:
+                </Text>
+                <Chip.Group multiple value={statuses} onChange={(v) => setStatuses(v as Stage2Status[])}>
+                  {(Object.keys(STATUS_COLOR) as Stage2Status[])
+                    .filter((st) => statusCounts.get(st))
+                    .map((st) => (
+                      <Chip key={st} value={st} size="sm" color={STATUS_COLOR[st]} variant="light">
+                        {st} ({statusCounts.get(st)})
+                      </Chip>
+                    ))}
+                </Chip.Group>
+                {statuses.length > 0 && (
+                  <Button size="compact-sm" variant="subtle" color="gray" onClick={() => setStatuses([])}>
+                    Сбросить
+                  </Button>
+                )}
               </Group>
               <Section p={0}>
                 <Table fz="sm" stickyHeader>

@@ -121,7 +121,7 @@ export default function QueueBoard({
                 const list = queues[l.code] ?? []
                 const started = list.filter(isStarted)
                 const rest = list.filter((t) => !isStarted(t))
-                const manual = rest.some((t) => t.line_locked)
+                const manual = rest.some((t) => t.line_source !== '1c')
                 const last = list.reduce<string | null>((m, t) => (t.end && (!m || t.end > m) ? t.end : m), null)
                 const hours = list.reduce((s, t) => s + t.hours, 0)
                 return (
@@ -134,7 +134,7 @@ export default function QueueBoard({
                         </Text>
                       </Box>
                       {manual && (
-                        <Tooltip label="Вернуть линию на автоматическую расстановку по приоритету">
+                        <Tooltip label="Вернуть заказы линии на линии из 1С, порядок — по приоритету">
                           <Button
                             size="compact-xs"
                             variant="subtle"
@@ -143,7 +143,7 @@ export default function QueueBoard({
                             disabled={busy}
                             onClick={() => onReset(l.code)}
                           >
-                            Авто
+                            Как в 1С
                           </Button>
                         </Tooltip>
                       )}
