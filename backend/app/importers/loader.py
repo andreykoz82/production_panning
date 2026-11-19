@@ -40,7 +40,12 @@ class SourceFiles:
 
     @classmethod
     def from_folder(cls, folder: Path | str) -> "SourceFiles":
-        files = [p for p in Path(folder).iterdir() if p.suffix.lower() in (".xlsx", ".xls")]
+        # «~$…» — файл блокировки, который Excel создаёт рядом с открытой книгой; «.…» — скрытые файлы
+        files = [
+            p
+            for p in Path(folder).iterdir()
+            if p.suffix.lower() in (".xlsx", ".xls") and not p.name.startswith(("~$", "."))
+        ]
         found: dict[str, list[Path]] = {k: [] for k in FILE_PATTERNS}
         for path in sorted(files):
             low = path.name.lower()
@@ -104,14 +109,29 @@ class ImportResult:
         }
 
 
+def _read(parser, path, *args):
+    """Разбор одного отчёта: любая ошибка чтения — понятное сообщение с именем файла, а не «Ошибка 500»."""
+    try:
+        return parser(path, *args)
+    except ReportFormatError as exc:
+        names = ", ".join(p.name for p in path) if isinstance(path, list) else Path(path).name
+        raise ReportFormatError(f"{names}: {exc}") from exc
+    except Exception as exc:
+        names = ", ".join(p.name for p in path) if isinstance(path, list) else Path(path).name
+        raise ReportFormatError(
+            f"Не удалось прочитать {names}: {type(exc).__name__}: {exc}. "
+            "Проверьте, что файл сохранён в формате .xlsx и не открыт в Excel."
+        ) from exc
+
+
 def import_sources(files: SourceFiles, today: date | None = None) -> ImportResult:
-    items = parse_items(files.items)
-    stock = parse_stock(files.stock)
-    specs = parse_specs(files.specs)
+    items = _read(parse_items, files.items)
+    stock = _read(parse_stock, files.stock)
+    specs = _read(parse_specs, files.specs)
     specs_eff = effective_specs(specs)
-    plan = parse_sales_plan(files.sales_plan)
-    orders = parse_orders(files.orders) if files.orders else pd.DataFrame(columns=ORDER_COLUMNS)
-    gp_lots = parse_gp_lots(files.gp_lots) if files.gp_lots else pd.DataFrame(columns=LOT_COLUMNS)
+    plan = _read(parse_sales_plan, files.sales_plan)
+    orders = _read(parse_orders, files.orders) if files.orders else pd.DataFrame(columns=ORDER_COLUMNS)
+    gp_lots = _read(parse_gp_lots, files.gp_lots) if files.gp_lots else pd.DataFrame(columns=LOT_COLUMNS)
 
     # ГП ↔ спецификация
     matches = match_items_to_specs(items, specs_eff).set_index("item")
