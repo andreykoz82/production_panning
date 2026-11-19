@@ -83,6 +83,21 @@ def save_snapshot(session: Session, result: ImportResult, source: str) -> models
     session.execute(insert(models.SpecLine), _records(specs, spec_cols, sid))
 
     plan_cols = ["name", "item", "month", "qty", "amount", "source"]
+    if len(result.gp_lots):
+        lot_cols = [
+            "name",
+            "item",
+            "series",
+            "production_date",
+            "expiry",
+            "shelf_life_months",
+            "brand",
+            "qty",
+            "residual_pct",
+            "report_date",
+        ]
+        lots = result.gp_lots.astype(object).where(result.gp_lots.notna(), None)
+        session.execute(insert(models.GpLot), _records(lots, lot_cols, sid))
     session.execute(insert(models.SalesPlanRow), _records(result.sales_plan, plan_cols, sid))
 
     if len(result.orders):

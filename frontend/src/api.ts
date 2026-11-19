@@ -311,3 +311,98 @@ export const warehouseApi = {
   list: () => request<{ roles: Record<string, string>; warehouses: WarehouseInfo[] }>('/api/warehouses'),
   setRole: (warehouse: string, role: string | null) => request('/api/warehouses', json('PUT', { warehouse, role })),
 }
+
+// ---------- сроки годности ГП
+
+export type ShelfStatus = 'Неликвид есть' | 'Уйдёт в неликвид' | 'Не хватит' | 'Норма'
+
+export interface ShelfParams {
+  horizon_months: number
+  fulfillment_pct: number
+  threshold_pct: number
+  replenish: boolean
+  cover_months: number
+}
+
+export interface ShelfItem {
+  item: string
+  stm: boolean
+  status: ShelfStatus
+  shelf_life_months: number | null
+  stock: number
+  lots: number
+  illiquid_now: number
+  illiquid_forecast: number
+  first_illiquid: string | null
+  monthly_demand: number
+  coverage_months: number | null
+  sales: number
+  demand: number
+  lost_sales: number
+  produced_orders: number
+  produced_planned: number
+}
+
+export interface ShelfMonth {
+  month: string
+  sales: number
+  demand: number
+  orders: number
+  planned: number
+  illiquid: number
+  lost: number
+  liquid_end: number
+  illiquid_end: number
+}
+
+export interface ShelfLot {
+  series: string
+  source: 'склад' | 'заказ' | 'наработка'
+  qty: number
+  production: string
+  available: string
+  expiry: string
+  illiquid_from: string
+  residual_pct: number
+  sold: number
+  sold_out: string | null
+  illiquid_qty: number
+  illiquid_date: string | null
+  left: number
+}
+
+export interface ShelfAnalysis {
+  params: ShelfParams & { calc_date: string }
+  report_date: string | null
+  summary: {
+    items: number
+    lots: number
+    lots_out_of_scope: number
+    stock: number
+    illiquid_now: number
+    illiquid_forecast: number
+    items_illiquid_now: number
+    items_at_risk: number
+    sales: number
+    demand: number
+    lost_sales: number
+    produced_orders: number
+    produced_planned: number
+  }
+  months: ShelfMonth[]
+  items: ShelfItem[]
+  detail: {
+    item: string
+    row: ShelfItem
+    points: { date: string; liquid: number; illiquid: number; arrived: number; sold: number; lost: number }[]
+    months: ShelfMonth[]
+    lots: ShelfLot[]
+  } | null
+}
+
+export const shelfApi = {
+  analyze: (p: ShelfParams, item?: string) => {
+    const q = new URLSearchParams(Object.entries({ ...p, ...(item ? { item } : {}) }).map(([k, v]) => [k, String(v)]))
+    return request<ShelfAnalysis>(`/api/shelf-life?${q}`)
+  },
+}
