@@ -7,6 +7,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.reference.lines import line_from_1c
 
 
 class ImportSnapshot(Base):
@@ -180,6 +181,9 @@ class ScheduleTask(Base):
     hours: Mapped[float] = mapped_column(Float, default=0)
     changeover: Mapped[bool] = mapped_column(Boolean, default=False)
     line_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # линия закреплена
+    # откуда линия: «1c» — как в 1С (по умолчанию), «manual» — выбрана/переставлена вручную,
+    # «auto» — планировщик выбирает линию группы по загрузке
+    line_source: Mapped[str | None] = mapped_column(String(10))
     seq: Mapped[int | None] = mapped_column(Integer)  # место в ручной очереди линии
     stockout_month: Mapped[date | None] = mapped_column(Date)  # когда кончится запас ГП (из расчёта)
     stm: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # СТМ — по письму клиента
@@ -191,6 +195,11 @@ class ScheduleTask(Base):
     available_from: Mapped[date | None] = mapped_column(Date)
     warnings: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    @property
+    def line_1c_code(self) -> str | None:
+        """Линия из 1С в кодах приложения."""
+        return line_from_1c(self.line_1c)
 
 
 class WarehouseRole(Base):

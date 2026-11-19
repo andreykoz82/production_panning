@@ -317,7 +317,7 @@ export default function GanttPage() {
             </Button.Group>
             <Group gap="lg">
               <Text size="xs" c="dimmed">
-                ▶ начат в 1С · 📍 очередь задана вручную · фиолетовым — СТМ · бордовым — переналадка
+                ▶ начат в 1С · 📍 линия или очередь изменены вручную · фиолетовым — СТМ · бордовым — переналадка
               </Text>
               <Switch
                 label="Этапы под линиями"
@@ -402,6 +402,7 @@ function OrderRow({
   act: (fn: () => Promise<unknown>, done?: (r: unknown) => string | null) => void
 }) {
   const started = t.status === STARTED
+  const line1c = t.line_1c_code ? (data.lines.find((l) => l.code === t.line_1c_code)?.title ?? t.line_1c_code) : null
   return (
     <Table.Tr bg={t.warnings.length ? 'orange.0' : undefined}>
       <Table.Td style={{ whiteSpace: 'nowrap' }}>
@@ -450,15 +451,13 @@ function OrderRow({
       <Table.Td>
         <Select
           size="xs"
-          w={170}
+          w={190}
           allowDeselect={false}
           disabled={started}
-          value={t.line_locked ? t.line_code : 'auto'}
+          value={t.line_source === 'manual' ? t.line_code : t.line_source === 'auto' ? 'auto' : 'onec'}
           data={[
-            {
-              value: 'auto',
-              label: `Авто${t.line_code && !t.line_locked ? ` (${data.lines.find((l) => l.code === t.line_code)?.title ?? t.line_code})` : ''}`,
-            },
+            { value: 'onec', label: `Как в 1С${line1c ? ` (${line1c})` : ' — нет линии'}` },
+            { value: 'auto', label: 'По загрузке' },
             ...data.lines
               .filter((l) => l.group === t.line_group)
               .map((l) => ({ value: l.code, label: l.title ?? l.code })),
@@ -467,13 +466,17 @@ function OrderRow({
             if (!v) return
             act(
               () =>
-                v === 'auto'
-                  ? scheduleApi.patchTask(t.id, { pin_line: false })
-                  : scheduleApi.patchTask(t.id, { line_code: v, pin_line: true }),
+                v === 'onec'
+                  ? scheduleApi.patchTask(t.id, { from_1c: true })
+                  : v === 'auto'
+                    ? scheduleApi.patchTask(t.id, { pin_line: false })
+                    : scheduleApi.patchTask(t.id, { line_code: v, pin_line: true }),
               () =>
-                v === 'auto'
-                  ? `Заказ ${t.number}: линия выбирается автоматически`
-                  : `Заказ ${t.number} — в конец очереди ${v}`,
+                v === 'onec'
+                  ? `Заказ ${t.number}: линия как в 1С`
+                  : v === 'auto'
+                    ? `Заказ ${t.number}: линия выбирается по загрузке`
+                    : `Заказ ${t.number} — в конец очереди ${v}`,
             )
           }}
         />

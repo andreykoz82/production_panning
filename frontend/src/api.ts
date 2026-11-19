@@ -227,6 +227,8 @@ export interface ScheduleTask {
   hours: number
   changeover: boolean
   line_locked: boolean
+  line_source: '1c' | 'manual' | 'auto' | null
+  line_1c_code: string | null
   seq: number | null
   stockout_month: string | null
   stm: boolean
@@ -286,7 +288,7 @@ export const scheduleApi = {
       method: 'POST',
     }),
   replan: () => request('/api/schedule/replan', { method: 'POST' }),
-  patchTask: (id: number, patch: { line_code?: string; pin_line?: boolean }) =>
+  patchTask: (id: number, patch: { line_code?: string; pin_line?: boolean; from_1c?: boolean }) =>
     request(`/api/schedule/tasks/${id}`, json('PATCH', patch)),
   setQueues: (queues: Record<string, number[]>) => request('/api/schedule/queues', json('PUT', { queues })),
   resetQueue: (line_code: string) =>

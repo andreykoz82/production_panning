@@ -50,6 +50,8 @@ class TaskOut(BaseModel):
     hours: float
     changeover: bool
     line_locked: bool
+    line_source: str | None = None
+    line_1c_code: str | None = None
     seq: int | None = None
     stockout_month: date | None = None
     stm: bool = False
@@ -64,7 +66,8 @@ class TaskOut(BaseModel):
 
 class TaskPatch(BaseModel):
     line_code: str | None = None
-    pin_line: bool | None = Field(None, description="Закрепить линию (False — автоматически)")
+    pin_line: bool | None = Field(None, description="Закрепить линию (False — по загрузке)")
+    from_1c: bool = Field(False, description="Линия как в 1С")
 
 
 class QueuesIn(BaseModel):
@@ -151,7 +154,7 @@ def get_schedule(
 
 @router.patch("/api/schedule/tasks/{task_id}")
 def patch_task(task_id: int, body: TaskPatch, session: SessionDep):
-    _guard(svc.move_task, session, task_id, body.line_code, body.pin_line)
+    _guard(svc.move_task, session, task_id, body.line_code, body.pin_line, body.from_1c)
     return {"ok": True}
 
 

@@ -205,3 +205,31 @@ def test_capacity_summary(client):
     assert bbl["months"][0]["hours"] == days * 8 * 3 and bbl["months"][0]["output"] == days * 3 * 17283
     assert bbl["total"] == sum(m["output"] for m in bbl["months"])
     assert any(g["unit"] == "кг" for g in data["groups"])
+
+
+def test_line_from_1c_by_default(client, data_dir):
+    from app.reference.lines import LINE_BY_CODE, line_from_1c
+
+    client.post("/api/imports/from-folder")
+    client.post("/api/planning/stage2", json={"horizon_months": 3})
+    client.post("/api/schedule/sync")
+    tasks = client.get("/api/schedule").json()["tasks"]
+    for t in tasks:  # каждый заказ — на линии из 1С
+        code = line_from_1c(t["line_1c"])
+        if code and LINE_BY_CODE[code].group == t["line_group"]:
+            assert (t["line_code"], t["line_locked"], t["line_source"]) == (code, True, "1c"), t["number"]
+
+    t = next(t for t in tasks if t["status"] != "Начат" and t["line_group"] == "Линия ББЛ")
+    other = next(c for c in ("BBL-1", "BBL-2", "BBL-3") if c != t["line_code"])
+    client.patch(f"/api/schedule/tasks/{t['id']}", json={"line_code": other, "pin_line": True})
+    client.post("/api/schedule/sync")  # ручной выбор не затирается загрузкой из 1С
+    moved = next(x for x in client.get("/api/schedule").json()["tasks"] if x["id"] == t["id"])
+    assert (moved["line_code"], moved["line_source"]) == (other, "manual")
+
+    client.patch(f"/api/schedule/tasks/{t['id']}", json={"pin_line": False})
+    auto = next(x for x in client.get("/api/schedule").json()["tasks"] if x["id"] == t["id"])
+    assert auto["line_source"] == "auto" and not auto["line_locked"]
+
+    client.patch(f"/api/schedule/tasks/{t['id']}", json={"from_1c": True})
+    back = next(x for x in client.get("/api/schedule").json()["tasks"] if x["id"] == t["id"])
+    assert (back["line_code"], back["line_source"]) == (t["line_code"], "1c")

@@ -18,6 +18,7 @@ from app.reference.lines import (
     LINES,
     NFP_QUARANTINE_WORKDAYS,
     STAGE2_GROUPS,
+    line_from_1c,
 )
 from app.scheduling.calendars import LineCalendar, validate
 from app.scheduling.scheduler import DEFAULT_HORIZON_DAYS, Task, schedule
@@ -194,6 +195,7 @@ def latest_stage2_run(session: Session, snapshot_id: int | None = None) -> model
 
 
 STARTED = "Начат"
+SOURCE_1C, SOURCE_MANUAL, SOURCE_AUTO = "1c", "manual", "auto"
 STM_PRIORITY = 0  # раньше любого нашего продукта (их приоритеты — с 1)
 
 
@@ -232,18 +234,17 @@ def sync_orders(session: Session, snapshot_id: int | None = None) -> dict:
         seen.add(o.number)
         task = existing.get(o.number)
         if task is None:
-            task = models.ScheduleTask(number=o.number, item=item, warnings=[], line_code=line_1c)
-            task.line_locked = bool(started and line_1c)
+            task = models.ScheduleTask(number=o.number, item=item, warnings=[])
             session.add(task)
             added += 1
         else:
             changed = (task.qty, task.item, task.status, task.qty_done) != (o.qty, item, o.status, o.qty_done)
             updated += changed
-            # этап начат в 1С — его линия из 1С, место в очереди больше не меняется
-            if started and task.status != STARTED and line_1c:
-                task.line_code, task.line_locked, task.seq = line_1c, True, None
         task.qty, task.item, task.line_group = o.qty, item, group
         task.status, task.line_1c, task.started_at = o.status, o.line_1c, o.started_at
+        # линия — как в 1С, пока планировщик не выбрал другую; начатый этап — всегда как в 1С
+        if started or task.line_source in (None, SOURCE_1C):
+            _apply_1c(task, line_1c)
         task.qty_plan, task.qty_done = o.qty_plan, o.qty_done
         task.stm = item in stm_items
     removed = [n for n in existing if n not in seen]
@@ -327,6 +328,12 @@ def replan(session: Session, now: datetime | None = None, horizon_days: int = DE
     now = now or datetime.now()
     start = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     db_tasks = session.scalars(select(models.ScheduleTask).where(models.ScheduleTask.stage == 2)).all()
+    for db in db_tasks:  # задачи, созданные до 19.11.2026: ручная очередь остаётся, остальные — как в 1С
+        if db.line_source is None:
+            if db.seq is not None:
+                db.line_source = SOURCE_MANUAL
+            else:
+                _apply_1c(db)
     snapshot_id = latest_snapshot_id(session)
     run = latest_stage2_run(session, snapshot_id) or latest_stage2_run(session)
     run_lines = {r["item"]: r for r in (run.lines if run else [])}
@@ -393,22 +400,51 @@ def _editable(task: models.ScheduleTask) -> None:
         raise ValueError(f"Этап {task.number} начат в 1С — его линия и место в очереди не меняются")
 
 
-def move_task(session: Session, task_id: int, line_code: str | None, pin_line: bool | None, now=None) -> None:
-    """Выбор линии у заказа: line_code + pin_line=True закрепляет линию (в конец её очереди),
-    pin_line=False возвращает заказ на автоматическую расстановку."""
+def _line_1c(task: models.ScheduleTask) -> str | None:
+    """Линия из 1С в кодах приложения, если она из группы линий этого ГП."""
+    code = line_from_1c(task.line_1c)
+    return code if code and LINE_BY_CODE[code].group == task.line_group else None
+
+
+def _apply_1c(task: models.ScheduleTask, code: str | None = None) -> None:
+    """Линия как в 1С; если в 1С линия не указана или чужой группы — по загрузке."""
+    code = code if code is not None else _line_1c(task)
+    if code != task.line_code or not task.line_locked:
+        task.seq = None
+    task.line_source = SOURCE_1C
+    if code:
+        task.line_code, task.line_locked = code, True
+    else:
+        task.line_locked = False
+
+
+def move_task(
+    session: Session,
+    task_id: int,
+    line_code: str | None,
+    pin_line: bool | None,
+    from_1c: bool = False,
+    now=None,
+) -> None:
+    """Выбор линии у заказа: line_code + pin_line=True — вручную (в конец очереди линии),
+    pin_line=False — по загрузке, from_1c=True — как в 1С."""
     task = session.get(models.ScheduleTask, task_id)
     if task is None:
         raise LookupError("Заказ не найден")
     _editable(task)
-    if line_code is not None:
-        _check_group(task, line_code)
-        if line_code != task.line_code:
-            task.seq = None
-        task.line_code = line_code
-    if pin_line is not None:
-        task.line_locked = pin_line
-        if not pin_line:
-            task.seq = None
+    if from_1c:
+        _apply_1c(task)
+    else:
+        if line_code is not None:
+            _check_group(task, line_code)
+            if line_code != task.line_code:
+                task.seq = None
+            task.line_code = line_code
+        if pin_line is not None:
+            task.line_locked = pin_line
+            task.line_source = SOURCE_MANUAL if pin_line else SOURCE_AUTO
+            if not pin_line:
+                task.seq = None
     session.commit()
     replan(session, now)
 
@@ -438,6 +474,8 @@ def set_queues(session: Session, queues: dict[str, list[int]], now=None) -> None
             seen.add(task_id)
             _editable(task)
             _check_group(task, line_code)
+            if (task.line_code, task.seq) != (line_code, i) or task.line_source != SOURCE_1C:
+                task.line_source = SOURCE_MANUAL
             task.line_code, task.line_locked, task.seq = line_code, True, i
     stale = session.scalars(
         select(models.ScheduleTask).where(
@@ -446,17 +484,18 @@ def set_queues(session: Session, queues: dict[str, list[int]], now=None) -> None
     ).all()
     for task in stale:
         if task.id not in seen:
-            task.seq, task.line_locked = None, False
+            _apply_1c(task)
     session.commit()
     replan(session, now)
 
 
 def reset_queue(session: Session, line_code: str, now=None) -> None:
-    """Вернуть все незапущенные заказы линии на автоматическую расстановку."""
+    """Вернуть незапущенные заказы линии к линиям из 1С и порядку по приоритету."""
     tasks = session.scalars(select(models.ScheduleTask).where(models.ScheduleTask.line_code == line_code))
     for task in tasks:
         if task.status != STARTED:
-            task.seq, task.line_locked = None, False
+            _apply_1c(task)
+            task.seq = None
     session.commit()
     replan(session, now)
 

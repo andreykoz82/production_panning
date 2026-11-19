@@ -68,7 +68,9 @@ function marks(t: ScheduleTask) {
 
 function startMarks(t: ScheduleTask) {
   if (t.status === 'Начат') return '<span class="mk-started" title="Начат в 1С — место зафиксировано">▶</span> '
-  return t.line_locked ? '<span class="mk-pinned" title="Очередь линии задана вручную">📍</span> ' : ''
+  return t.line_source === 'manual'
+    ? '<span class="mk-pinned" title="Линия или очередь изменены вручную">📍</span> '
+    : ''
 }
 
 export function buildGroups(data: Schedule, expanded: Set<string>): TimelineGroup[] {
@@ -131,7 +133,7 @@ export function buildItems(
     const state = [
       t.warnings.length ? 'warn' : '',
       started ? 'started' : '',
-      t.line_locked && !started ? 'pinned' : '',
+      t.line_source === 'manual' && !started ? 'pinned' : '',
       t.stm ? 'stm' : '',
     ]
       .filter(Boolean)
