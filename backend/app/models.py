@@ -87,6 +87,23 @@ class SpecLine(_SnapshotRow, Base):
     analogs: Mapped[str | None] = mapped_column(Text)
 
 
+class GpLot(_SnapshotRow, Base):
+    """Серия ГП на складе ГП / опта со сроком годности (отчёт «Остатки ГП со сроками годности»)."""
+
+    __tablename__ = "gp_lot"
+
+    name: Mapped[str] = mapped_column(String(300), index=True)
+    item: Mapped[str | None] = mapped_column(String(300))  # ссылка на ГП из actual_items
+    series: Mapped[str | None] = mapped_column(String(100))
+    production_date: Mapped[date | None] = mapped_column(Date)
+    expiry: Mapped[date] = mapped_column(Date)
+    shelf_life_months: Mapped[float | None] = mapped_column(Float)
+    brand: Mapped[str | None] = mapped_column(String(100))
+    qty: Mapped[float] = mapped_column(Float)
+    residual_pct: Mapped[float | None] = mapped_column(Float)
+    report_date: Mapped[date | None] = mapped_column(Date)
+
+
 class SalesPlanRow(_SnapshotRow, Base):
     __tablename__ = "sales_plan_row"
 

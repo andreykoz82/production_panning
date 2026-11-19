@@ -233,3 +233,21 @@ def test_line_from_1c_by_default(client, data_dir):
     client.patch(f"/api/schedule/tasks/{t['id']}", json={"from_1c": True})
     back = next(x for x in client.get("/api/schedule").json()["tasks"] if x["id"] == t["id"])
     assert (back["line_code"], back["line_source"]) == (t["line_code"], "1c")
+
+
+def test_shelf_life_analysis(client, data_dir):
+    assert client.get("/api/shelf-life").status_code == 404  # нет снимка
+    client.post("/api/imports/from-folder")
+    data = client.get("/api/shelf-life", params={"threshold_pct": 70, "fulfillment_pct": 100}).json()
+    s = data["summary"]
+    assert s["items"] > 0 and s["lots"] > 0 and s["stock"] > 0
+    assert len(data["months"]) >= 12 and data["detail"] is None
+    item = data["items"][0]["item"]
+    detail = client.get("/api/shelf-life", params={"item": item}).json()["detail"]
+    assert detail["item"] == item and detail["points"] and detail["lots"]
+    # чем ниже выполнение плана, тем больше неликвида
+    low = client.get("/api/shelf-life", params={"fulfillment_pct": 50, "replenish": False}).json()["summary"]
+    full = client.get("/api/shelf-life", params={"fulfillment_pct": 100, "replenish": False}).json()[
+        "summary"
+    ]
+    assert low["illiquid_forecast"] >= full["illiquid_forecast"]

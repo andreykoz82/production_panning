@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from app.importers.common import ReportFormatError
+from app.importers.gp_lots import LOT_COLUMNS, parse_gp_lots
 from app.importers.items import parse_items
 from app.importers.matching import match_items_to_specs, match_to_catalog
 from app.importers.orders import ORDER_COLUMNS, link_stage1_orders, parse_orders
@@ -18,6 +19,8 @@ from app.importers.stock import parse_stock
 # Как узнаём файл по имени (без учёта регистра)
 FILE_PATTERNS = {
     "items": "actual_items",
+    # «Остатки ГП со сроками годности» — отдельный отчёт по сериям, его проверяем раньше
+    "gp_lots": "сроками годности",
     "stock": "остатки",
     "specs": "ресурсные спецификации",
     "sales_plan": "план продаж",
@@ -33,6 +36,7 @@ class SourceFiles:
     specs: Path
     sales_plan: list[Path]
     orders: Path | None = None
+    gp_lots: Path | None = None
 
     @classmethod
     def from_folder(cls, folder: Path | str) -> "SourceFiles":
@@ -43,6 +47,7 @@ class SourceFiles:
             for key, pattern in FILE_PATTERNS.items():
                 if pattern in low:
                     found[key].append(path)
+                    break  # один файл — один отчёт
         missing = [k for k in ("items", "stock", "specs", "sales_plan") if not found[k]]
         if missing:
             raise ReportFormatError(f"В папке {folder} нет файлов: {', '.join(missing)}")
@@ -52,6 +57,7 @@ class SourceFiles:
             specs=found["specs"][0],
             sales_plan=found["sales_plan"],
             orders=found["orders"][0] if found["orders"] else None,
+            gp_lots=found["gp_lots"][0] if found["gp_lots"] else None,
         )
 
 
@@ -63,6 +69,7 @@ class ImportResult:
     specs_effective: pd.DataFrame  # одна версия на спецификацию
     sales_plan: pd.DataFrame
     orders: pd.DataFrame
+    gp_lots: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=[*LOT_COLUMNS, "item"]))
     issues: list[Issue] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)
 
@@ -89,6 +96,7 @@ class ImportResult:
             "plan_to": str(self.sales_plan["month"].max()) if len(self.sales_plan) else None,
             "orders_stage1": int((self.orders["stage"] == 1).sum()),
             "orders_stage2": int((self.orders["stage"] == 2).sum()),
+            "gp_lots": int(len(self.gp_lots)),
             "warehouses": sorted(self.stock["warehouse"].unique().tolist()),
             "issues": {
                 sev: sum(1 for i in self.issues if i.severity == sev) for sev in ("error", "warning", "info")
@@ -103,6 +111,7 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
     specs_eff = effective_specs(specs)
     plan = parse_sales_plan(files.sales_plan)
     orders = parse_orders(files.orders) if files.orders else pd.DataFrame(columns=ORDER_COLUMNS)
+    gp_lots = parse_gp_lots(files.gp_lots) if files.gp_lots else pd.DataFrame(columns=LOT_COLUMNS)
 
     # ГП ↔ спецификация
     matches = match_items_to_specs(items, specs_eff).set_index("item")
@@ -142,6 +151,7 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
     orders = link_stage1_orders(orders, sorted(nfp_catalog), fractions, products)
     # ссылка на ГП для всех строк: какие склады считать запасом ГП, решают роли складов
     stock["item"] = match_to_catalog(stock["name"], catalog)
+    gp_lots["item"] = match_to_catalog(gp_lots["name"], catalog)
 
     result = ImportResult(
         items=items,
@@ -150,12 +160,14 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
         specs_effective=specs_eff,
         sales_plan=plan,
         orders=orders,
+        gp_lots=gp_lots,
         files={
             "items": files.items.name,
             "stock": files.stock.name,
             "specs": files.specs.name,
             "sales_plan": ", ".join(p.name for p in files.sales_plan),
             "orders": files.orders.name if files.orders else "",
+            "gp_lots": files.gp_lots.name if files.gp_lots else "",
         },
     )
     result.issues = check_quality(result, today=today or date.today())

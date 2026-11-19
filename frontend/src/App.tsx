@@ -6,6 +6,7 @@ import {
   IconChartBar,
   IconClipboardList,
   IconCloudDownload,
+  IconHourglass,
   IconLayoutKanban,
   IconLeaf,
   IconSettingsCog,
@@ -19,8 +20,9 @@ import LinesPage from './pages/LinesPage'
 import Stage2Page from './pages/Stage2Page'
 import WarehousesPage from './pages/WarehousesPage'
 
-// Гант тянет vis-timeline — грузим только при открытии
+// Гант тянет vis-timeline, сроки годности — графики: грузим только при открытии
 const GanttPage = lazy(() => import('./pages/GanttPage'))
+const ShelfLifePage = lazy(() => import('./pages/ShelfLifePage'))
 
 type Page = { key: string; label: string; icon: ReactNode; element?: ReactNode; soon?: boolean }
 
@@ -34,6 +36,7 @@ const SECTIONS: { title: string; pages: Page[] }[] = [
     pages: [
       { key: 'stage2', label: 'Потребность', icon: <IconClipboardList size={18} />, element: <Stage2Page /> },
       { key: 'gantt', label: 'График производства', icon: <IconTimeline size={18} />, element: <GanttPage /> },
+      { key: 'shelf', label: 'Сроки годности ГП', icon: <IconHourglass size={18} />, element: <ShelfLifePage /> },
     ],
   },
   {
