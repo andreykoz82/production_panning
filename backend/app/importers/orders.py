@@ -5,6 +5,10 @@
 фактическое начало, запланировано и выполнено. «Выполнено» заполняется только для 2 ступени —
 выпущенная продукция уже лежит на складе ГП, поэтому открытым считаем остаток «план − выполнено».
 
+С 19.11.2026 в отчёте есть альтернативные виды рабочих центров: «Альтернативные виды рабочих центров.Вид
+рабочего центра» и «….Использовать» (да/нет). У этапа с несколькими альтернативами — несколько строк.
+Линия этапа: альтернативный ВРЦ из строки, где «Использовать» = «Да»; если такой нет — основной ВРЦ.
+
 Старый формат («Заказ на производство» с колонками «Номер», «Комментарий», «Количество»)
 по-прежнему читается — все строки считаются заказами указанной ступени.
 """
@@ -75,7 +79,15 @@ def parse_orders(path: Path | str, stage: int = 2) -> pd.DataFrame:
 
 def _parse_stage_docs(raw: pd.DataFrame, head: int, header: list[str]) -> pd.DataFrame:
     def col(*names: str) -> int | None:
-        return next((header.index(n) for n in names if n in header), None)
+        """Колонка по точному имени, иначе по началу («Основной ВРЦ» → «Основной ВРЦ.Наименование»)."""
+        for n in names:
+            if n in header:
+                return header.index(n)
+        for n in names:
+            found = next((i for i, h in enumerate(header) if h.startswith(n)), None)
+            if found is not None:
+                return found
+        return None
 
     c_doc = col("Этап производства")
     c_spec = col("Спецификация", "Этап")
@@ -88,11 +100,13 @@ def _parse_stage_docs(raw: pd.DataFrame, head: int, header: list[str]) -> pd.Dat
         )
     c_done, c_status = col("Выполнено"), col("Статус")
     c_line, c_start, c_prod = col("Основной ВРЦ"), col("Фактическое начало этапа"), col("Дата производства")
+    c_alt = col("Альтернативные виды рабочих центров.Вид рабочего центра")
+    c_alt_use = col("Альтернативные виды рабочих центров.Использовать")
 
     def get(values, c):
         return values[c] if c is not None else None
 
-    rows = []
+    rows: dict[str, dict] = {}  # номер этапа → строка; у этапа может быть несколько строк (альтернативы ВРЦ)
     for values in raw.iloc[head + 1 :].itertuples(index=False):
         doc = clean(values[c_doc])
         m = _STAGE_DOC.search(doc or "")
@@ -100,27 +114,36 @@ def _parse_stage_docs(raw: pd.DataFrame, head: int, header: list[str]) -> pd.Dat
         stage = _stage_of(clean(values[c_dep]))
         if not m or not name or stage is None:
             continue  # «Итого» и пустые строки
+        alt = clean(get(values, c_alt))
+        use_alt = bool(alt) and _yes(get(values, c_alt_use))
+        if m[1] in rows:
+            if use_alt and not rows[m[1]]["_alt"]:
+                rows[m[1]].update(line_1c=alt, line_code=line_from_1c(alt), _alt=True)
+            continue
         plan = to_float(values[c_plan])
         # факт выпуска актуален только для 2 ступени
         done = to_float(get(values, c_done)) if stage == 2 else 0.0
-        line_1c = clean(get(values, c_line))
-        rows.append(
-            {
-                "number": m[1],
-                "stage": stage,
-                "name": name,
-                "qty": max(plan - done, 0.0),
-                "qty_plan": plan,
-                "qty_done": done,
-                "status": clean(get(values, c_status)),
-                "line_1c": line_1c,
-                "line_code": line_from_1c(line_1c),
-                "started_at": _datetime(get(values, c_start)),
-                "production_date": to_date(get(values, c_prod)),
-                "doc_date": _datetime(m[2]),
-            }
-        )
-    return pd.DataFrame(rows, columns=ORDER_COLUMNS)
+        line_1c = alt if use_alt else clean(get(values, c_line))
+        rows[m[1]] = {
+            "number": m[1],
+            "stage": stage,
+            "name": name,
+            "qty": max(plan - done, 0.0),
+            "qty_plan": plan,
+            "qty_done": done,
+            "status": clean(get(values, c_status)),
+            "line_1c": line_1c,
+            "line_code": line_from_1c(line_1c),
+            "started_at": _datetime(get(values, c_start)),
+            "production_date": to_date(get(values, c_prod)),
+            "doc_date": _datetime(m[2]),
+            "_alt": use_alt,
+        }
+    return pd.DataFrame(list(rows.values()), columns=ORDER_COLUMNS)
+
+
+def _yes(value) -> bool:
+    return (clean(value) or "").strip().lower() in {"да", "yes", "истина", "true", "1"}
 
 
 def _parse_legacy(raw: pd.DataFrame, head: int, header: list[str], stage: int) -> pd.DataFrame:

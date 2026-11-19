@@ -280,3 +280,50 @@ def test_specs_component_kind(tmp_path):
         "Вспомогательные материалы для производства"
     )
     assert pd.isna(specs.loc["Спирт этиловый", "component_kind"])
+
+
+def test_orders_alternative_work_center(tmp_path):
+    """Линия — альтернативный ВРЦ с «Использовать» = «Да», иначе основной; строки этапа схлопываются."""
+    from app.importers.orders import parse_orders
+
+    header = [
+        "Этап производства",
+        "Статус",
+        "Спецификация",
+        "Подразделение-исполнитель",
+        "Основной ВРЦ.Наименование",
+        "Альтернативные виды рабочих центров.Вид рабочего центра",
+        "Альтернативные виды рабочих центров.Использовать",
+        "Запланировано",
+        "Выполнено",
+    ]
+    doc = "Этап производства КЛ00-{} от 10.11.2026 13:44:31"
+    stage2 = "Вторая ступень производства"
+    rows = [
+        [
+            doc.format("1.1.1"),
+            "Начат",
+            "Мята",
+            stage2,
+            "Линия ИМА С 50.1",
+            "Линия ИМА C 50.2",
+            "Нет",
+            100,
+            40,
+        ],
+        [doc.format("1.1.1"), "Начат", "Мята", stage2, "Линия ИМА С 50.1", "Линия ИМА С 51", "Да", 100, 40],
+        [doc.format("2.1.1"), "Начат", "Мята", stage2, "Линия ББЛ 1", "Линия ББЛ 2", "Нет", 50, None],
+        [doc.format("2.1.1"), "Начат", "Мята", stage2, "Линия ББЛ 1", "Линия ББЛ 3", None, 50, None],
+        [doc.format("3.1.1"), "К выполнению", "Мята", stage2, "Линия Консумаш 1", None, None, 30, None],
+        ["Итого", None, None, None, None, None, None, 180, 40],
+    ]
+    path = tmp_path / "orders.xlsx"
+    pd.DataFrame([["Параметры:"], [], header, *rows]).to_excel(path, header=False, index=False)
+    orders = parse_orders(path).set_index("number")
+    assert list(orders.index) == ["КЛ00-1.1.1", "КЛ00-2.1.1", "КЛ00-3.1.1"]
+    assert orders["line_code"].to_dict() == {
+        "КЛ00-1.1.1": "IMA C51",
+        "КЛ00-2.1.1": "BBL-1",
+        "КЛ00-3.1.1": "Consumasz",
+    }
+    assert orders.loc["КЛ00-1.1.1", "qty"] == 60
