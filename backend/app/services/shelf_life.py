@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.planning.shelf_life import ItemResult, ShelfLifeParams, analyze
+from app.reference.bottling import is_bottling
 from app.reference.lines import GP_CERTIFICATION_DAYS
+from app.reference.stm import is_stm
 from app.services.schedule import latest_snapshot_id
 
 STATUS_ILLIQUID = "Неликвид есть"
@@ -29,7 +31,8 @@ def shelf_life_analysis(session: Session, p: ShelfLifeParams, item: str | None =
     if not snapshot_id:
         raise LookupError("Нет снимка данных — сначала загрузите выгрузки 1С")
     items = _frame(session, models.Item, snapshot_id, ["name", "in_scope", "stm", "min_series", "max_series"])
-    items = items[items["in_scope"]]
+    # СТМ производится только по письму клиента — в анализ не входит
+    items = items[items["in_scope"] & ~items["stm"].astype(bool)].assign(bottling=False)
     lots_all = _frame(
         session,
         models.GpLot,
@@ -50,8 +53,10 @@ def shelf_life_analysis(session: Session, p: ShelfLifeParams, item: str | None =
         raise LookupError(
             "В снимке нет отчёта «Остатки ГП со сроками годности» — добавьте его в папку и загрузите данные"
         )
+    plan = _frame(session, models.SalesPlanRow, snapshot_id, ["name", "item", "month", "qty"])
+    if p.bottling:
+        items, lots_all, plan = _with_bottling(items, lots_all, plan)
     lots = lots_all[lots_all["item"].isin(items["name"])]
-    plan = _frame(session, models.SalesPlanRow, snapshot_id, ["item", "month", "qty"])
 
     orders = []
     for t in session.scalars(select(models.ScheduleTask).where(models.ScheduleTask.stage == 2)):
@@ -64,6 +69,9 @@ def shelf_life_analysis(session: Session, p: ShelfLifeParams, item: str | None =
     result = analyze(items, lots, plan, orders, p)
     results: list[ItemResult] = result["results"]
 
+    bottling = set(items.loc[items["bottling"], "name"])
+    for r in results:
+        r.bottling = r.item in bottling
     rows = [_item_row(r) for r in results]
     rows.sort(key=lambda r: (-(r["illiquid_now"] + r["illiquid_forecast"]), r["item"]))
     detail = next((r for r in results if r.item == item), None) if item else None
@@ -76,6 +84,7 @@ def shelf_life_analysis(session: Session, p: ShelfLifeParams, item: str | None =
             "threshold_pct": p.threshold_pct,
             "replenish": p.replenish,
             "cover_months": p.cover_months,
+            "bottling": p.bottling,
         },
         "report_date": report_date if pd.notna(report_date) else None,
         "summary": _summary(results, lots_all, lots),
@@ -83,6 +92,29 @@ def shelf_life_analysis(session: Session, p: ShelfLifeParams, item: str | None =
         "items": rows,
         "detail": _detail(detail, p) if detail else None,
     }
+
+
+def _with_bottling(
+    items: pd.DataFrame, lots: pd.DataFrame, plan: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Розлив: позиции нет в справочнике ГП — ссылка на ГП по точному наименованию в остатках и плане."""
+    lot_names = lots.loc[lots["item"].isna(), "name"]
+    free_plan = plan[plan["item"].isna()]
+    plan_qty = free_plan.groupby("name")["qty"].sum()
+    names = sorted(
+        n
+        for n in set(lot_names) | set(plan_qty.index)
+        if is_bottling(n) and not is_stm(n) and (n in set(lot_names) or plan_qty.get(n, 0) > 0)
+    )
+    if not names:
+        return items, lots, plan
+    lots = lots.copy()
+    plan = plan.copy()
+    lots.loc[lots["item"].isna() & lots["name"].isin(names), "item"] = lots["name"]
+    plan.loc[plan["item"].isna() & plan["name"].isin(names), "item"] = plan["name"]
+    extra = pd.DataFrame({"name": names, "in_scope": True, "stm": False, "bottling": True})
+    extra["min_series"] = extra["max_series"] = None
+    return pd.concat([items, extra], ignore_index=True), lots, plan
 
 
 def _status(r: ItemResult) -> str:
@@ -98,13 +130,14 @@ def _status(r: ItemResult) -> str:
 def _item_row(r: ItemResult) -> dict:
     return {
         "item": r.item,
-        "stm": r.stm,
+        "bottling": r.bottling,
         "status": _status(r),
         "shelf_life_months": r.shelf_life_months,
         "stock": round(r.stock),
         "lots": sum(1 for lot in r.lots if lot.source == "склад"),
         "illiquid_now": round(r.illiquid_now),
         "illiquid_forecast": round(r.illiquid_forecast),
+        "illiquid_total": round(r.illiquid_now + r.illiquid_forecast),
         "first_illiquid": r.first_illiquid,
         "monthly_demand": round(r.monthly_demand),
         "coverage_months": round(r.stock / r.monthly_demand, 1) if r.monthly_demand else None,
@@ -119,6 +152,7 @@ def _item_row(r: ItemResult) -> dict:
 def _summary(results: list[ItemResult], lots_all: pd.DataFrame, lots: pd.DataFrame) -> dict:
     return {
         "items": len(results),
+        "items_bottling": sum(1 for r in results if r.bottling),
         "lots": int(len(lots)),
         "lots_out_of_scope": int(len(lots_all) - len(lots)),
         "stock": round(sum(r.stock for r in results)),
@@ -146,7 +180,8 @@ def _months(results: list[ItemResult]) -> list[dict]:
 
 def _detail(r: ItemResult, p: ShelfLifeParams) -> dict:
     threshold = p.threshold_pct / 100
-    lots = sorted(r.lots, key=lambda lot: (lot.available, lot.expiry))
+    # сначала серии с наибольшим неликвидом, дальше — по дате поступления
+    lots = sorted(r.lots, key=lambda lot: (-round(lot.illiquid_qty), lot.available, lot.expiry))
     return {
         "item": r.item,
         "row": _item_row(r),

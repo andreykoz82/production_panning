@@ -26,6 +26,7 @@ def get_shelf_life(
     ] = DEFAULT_THRESHOLD_PCT,
     replenish: Annotated[bool, Query(description="Учитывать будущую наработку")] = True,
     cover_months: Annotated[float, Query(ge=0.5, le=12)] = 3,
+    bottling: Annotated[bool, Query(description="Включать розлив")] = True,
     calc_date: date | None = None,
     item: str | None = Query(None, description="ГП для подробностей"),
 ):
@@ -36,6 +37,7 @@ def get_shelf_life(
         threshold_pct=threshold_pct,
         replenish=replenish,
         cover_months=cover_months,
+        bottling=bottling,
     )
     try:
         return shelf_life_analysis(session, params, item)

@@ -322,17 +322,19 @@ export interface ShelfParams {
   threshold_pct: number
   replenish: boolean
   cover_months: number
+  bottling: boolean
 }
 
 export interface ShelfItem {
   item: string
-  stm: boolean
+  bottling: boolean
   status: ShelfStatus
   shelf_life_months: number | null
   stock: number
   lots: number
   illiquid_now: number
   illiquid_forecast: number
+  illiquid_total: number
   first_illiquid: string | null
   monthly_demand: number
   coverage_months: number | null
@@ -378,6 +380,7 @@ export interface ShelfAnalysis {
     items: number
     lots: number
     lots_out_of_scope: number
+    items_bottling: number
     stock: number
     illiquid_now: number
     illiquid_forecast: number

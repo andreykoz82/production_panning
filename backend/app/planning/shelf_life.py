@@ -36,6 +36,7 @@ class ShelfLifeParams:
     threshold_pct: float = DEFAULT_THRESHOLD_PCT  # ниже — неликвид
     replenish: bool = True  # учитывать будущую наработку
     cover_months: float = 3.0  # на сколько месяцев продаж нарабатываем серию
+    bottling: bool = True  # включать розлив (Стоматофит, Бронхофитол, НЮДА)
 
 
 @dataclass
@@ -82,6 +83,7 @@ class ItemResult:
     monthly_demand: float
     points: list[dict] = field(default_factory=list)
     months: dict[date, dict] = field(default_factory=dict)
+    bottling: bool = False
 
 
 def add_months(d: date, months: int) -> date:
