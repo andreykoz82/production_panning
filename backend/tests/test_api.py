@@ -262,3 +262,19 @@ def test_shelf_life_analysis(client, data_dir):
     assert any("Стоматофит" in n for n in bottling) and s["items_bottling"] == len(bottling)
     off = client.get("/api/shelf-life", params={"bottling": False}).json()
     assert not any(i["bottling"] for i in off["items"]) and off["summary"]["stock"] < s["stock"]
+
+
+def test_import_skips_excel_lock_file(client, data_dir, tmp_path, monkeypatch):
+    """Открытая в Excel книга оставляет рядом «~$…» — он не должен ломать загрузку."""
+    import shutil
+
+    from app.config import settings
+
+    for f in data_dir.glob("*.xlsx"):
+        shutil.copy(f, tmp_path / f.name)
+    (tmp_path / "~$Список активных заказов 2 ступень.xlsx").write_bytes(b"\x0bAndrey\x00\x00")
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    assert client.post("/api/imports/from-folder").status_code == 200
+    (tmp_path / "Остатки по складам.xlsx").write_bytes(b"not an excel file")
+    r = client.post("/api/imports/from-folder")
+    assert r.status_code == 422 and "Остатки по складам.xlsx" in r.json()["detail"]
