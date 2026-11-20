@@ -131,11 +131,8 @@ def simulate_item(
     pending: list[Lot] = []
     for o in orders:
         made = o["produced"]
-        pending.append(
-            Lot(
-                o["number"], float(o["qty"]), made, made + timedelta(days=shelf_days), o["available"], "заказ"
-            )
-        )
+        expiry = o.get("expiry") or made + timedelta(days=shelf_days)
+        pending.append(Lot(o["number"], float(o["qty"]), made, expiry, o["available"], "заказ"))
     produced_orders = sum(lot.qty for lot in pending if lot.available < end)
 
     def daily(d: date) -> float:

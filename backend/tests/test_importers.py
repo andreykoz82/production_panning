@@ -327,3 +327,47 @@ def test_orders_alternative_work_center(tmp_path):
         "КЛ00-3.1.1": "Consumasz",
     }
     assert orders.loc["КЛ00-1.1.1", "qty"] == 60
+
+
+def test_finished_stages_are_not_orders_and_track_releases(imported):
+    """Завершённые этапы — не открытые заказы; свежий выпуск без серии в остатках ГП — «не оприходовано»."""
+    assert not imported.orders["status"].str.startswith("Заверш").any()
+    rel = imported.releases
+    assert len(rel) > 0 and rel["received"].any()
+    transit = rel[rel["in_transit"]]
+    assert (transit["received"] == False).all()  # noqa: E712
+    # серия этапа есть в остатках ГП → поступил
+    lot_series = set(imported.gp_lots["series"].astype(str))
+    assert rel.loc[rel["received"] == True, "series"].isin(lot_series).all()  # noqa: E712
+
+
+def test_releases_in_transit_rules():
+    from app.importers.loader import _releases
+
+    catalog = pd.Series(["Мята 50г", "Чага 50г"])
+    finished = pd.DataFrame(
+        {
+            "number": ["A", "B", "C", "D"],
+            "name": ["Мята 50г", "Чага 50г", "Мята 50г", "Чага 50г"],
+            "item": ["Мята 50г", "Чага 50г", "Мята 50г", "Чага 50г"],
+            "gp_name": ["Мята 50г", "Чага 50г", "Мята 50г", "Чага 50г"],
+            "gp_series": ["111126", "221126", "331026", None],
+            "gp_expiry": [None] * 4,
+            "qty_done": [1000.0, 500.0, 700.0, 300.0],
+            "qty_plan": [1000.0, 500.0, 700.0, 300.0],
+            "production_date": [
+                date(2026, 11, 19),
+                date(2026, 11, 18),
+                date(2026, 10, 30),
+                date(2026, 11, 19),
+            ],
+            "started_at": [pd.NaT] * 4,
+            "line_code": ["BBL-1"] * 4,
+        }
+    )
+    lots = pd.DataFrame({"series": ["221126"]})
+    rel = _releases(finished, lots, catalog, date(2026, 11, 20)).set_index("number")
+    assert rel.loc["A", "in_transit"] and rel.loc["A", "received"] is False  # серии нет в остатках
+    assert rel.loc["B", "received"] is True and not rel.loc["B", "in_transit"]  # поступил
+    assert not rel.loc["C", "in_transit"]  # старше 14 дней — видимо, уже продан
+    assert rel.loc["D", "received"] is None and not rel.loc["D", "in_transit"]  # нет серии — проверить нельзя

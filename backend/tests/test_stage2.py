@@ -217,6 +217,19 @@ def test_enough_stock_needs_nothing():
     assert r["stockout_month"] is None  # 5 000 хватает на весь план
 
 
+def test_released_not_received_counts_as_stock():
+    """Этап завершён, серия ещё не на складе ГП — это запас, повторно выпускать не нужно."""
+    data = _data(
+        items=[{"name": "Мята 50г", "nfp": "Мята НФП", "spec": "Мята 50г"}],
+        specs=_spec("Мята 50г"),
+        plan=[("Мята 50г", date(2026, 12, 1), 10_000)],
+    )
+    before = calculate_stage2(data, Stage2Params(3, CALC)).lines.iloc[0]
+    data.in_transit = pd.DataFrame([{"item": "Мята 50г", "qty": 9_737.0}])
+    after = calculate_stage2(data, Stage2Params(3, CALC)).lines.iloc[0]
+    assert after["gp_in_transit"] == 9_737 and after["need"] < before["need"]
+
+
 def test_horizon_validation():
     with pytest.raises(ValueError):
         Stage2Params(0, CALC)

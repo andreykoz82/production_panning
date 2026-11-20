@@ -100,6 +100,12 @@ def save_snapshot(session: Session, result: ImportResult, source: str) -> models
         session.execute(insert(models.GpLot), _records(lots, lot_cols, sid))
     session.execute(insert(models.SalesPlanRow), _records(result.sales_plan, plan_cols, sid))
 
+    if len(result.releases):
+        rel_cols = ["number", "name", "item", "series", "expiry", "qty", "production_date", "line_code"]
+        rel_cols += ["received", "in_transit"]
+        rel = result.releases.astype(object).where(result.releases.notna(), None)
+        session.execute(insert(models.GpRelease), _records(rel, rel_cols, sid))
+
     if len(result.orders):
         order_cols = ["number", "stage", "name", "item", "qty", "qty_plan", "qty_done", "status", "line_1c"]
         order_cols += ["line_code", "started_at", "production_date", "doc_date", "nfp", "nfp_characteristic"]
