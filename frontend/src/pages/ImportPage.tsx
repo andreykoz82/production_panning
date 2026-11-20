@@ -188,7 +188,18 @@ export default function ImportPage() {
               color="orange"
               label="Открытых этапов 2 ступени"
               value={snap.summary.orders_stage2}
-              hint={snap.summary.orders_stage1 != null ? `1 ступени: ${snap.summary.orders_stage1}` : undefined}
+              hint={
+                [
+                  snap.summary.orders_stage1 != null ? `1 ступени: ${snap.summary.orders_stage1}` : null,
+                  snap.summary.gp_in_transit
+                    ? `не оприходовано: ${snap.summary.gp_in_transit} эт., ${Math.round(
+                        snap.summary.gp_in_transit_qty ?? 0,
+                      ).toLocaleString('ru-RU')} шт`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ') || undefined
+              }
             />
           </SimpleGrid>
 

@@ -58,7 +58,10 @@ def load_planning_data(session: Session, snapshot_id: int, with_reserve: bool = 
         snapshot_id,
         ["number", "item", "qty", "stage", "nfp", "nfp_characteristic"],
     )
-    return PlanningData(items=items, stock=stock, specs=specs, plan=plan, orders=orders)
+    transit = _frame(
+        session, models.GpRelease, snapshot_id, ["item", "qty"], models.GpRelease.in_transit.is_(True)
+    )
+    return PlanningData(items=items, stock=stock, specs=specs, plan=plan, orders=orders, in_transit=transit)
 
 
 def _jsonable(df: pd.DataFrame) -> list[dict]:

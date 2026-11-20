@@ -35,7 +35,20 @@ ORDER_COLUMNS = [
     "started_at",
     "production_date",
     "doc_date",
+    "gp_series",  # «Серия ГП»: номер серии (до запятой)
+    "gp_expiry",  # «Серия ГП»: годен до
+    "gp_name",  # «Наименование ГП»
 ]
+
+# Статусы этапов, которые уже не в работе. С 20.11.2026 отчёт выгружает все этапы за период,
+# завершённые нужны, чтобы отследить выпуск, который ещё не поступил на склад ГП.
+FINISHED_STATUSES = ("заверш", "закрыт", "отмен")
+
+
+def is_finished(status) -> bool:
+    low = (clean(status) or "").lower()
+    return low.startswith(FINISHED_STATUSES)
+
 
 _STAGE_DOC = re.compile(r"(КЛ\d{2}-[\d.]+)\s+от\s+(\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?)")
 
@@ -102,6 +115,7 @@ def _parse_stage_docs(raw: pd.DataFrame, head: int, header: list[str]) -> pd.Dat
     c_line, c_start, c_prod = col("Основной ВРЦ"), col("Фактическое начало этапа"), col("Дата производства")
     c_alt = col("Альтернативные виды рабочих центров.Вид рабочего центра")
     c_alt_use = col("Альтернативные виды рабочих центров.Использовать")
+    c_series, c_gp_name = col("Серия ГП"), col("Наименование ГП")
 
     def get(values, c):
         return values[c] if c is not None else None
@@ -124,22 +138,36 @@ def _parse_stage_docs(raw: pd.DataFrame, head: int, header: list[str]) -> pd.Dat
         # факт выпуска актуален только для 2 ступени
         done = to_float(get(values, c_done)) if stage == 2 else 0.0
         line_1c = alt if use_alt else clean(get(values, c_line))
+        status = clean(get(values, c_status))
+        series, expiry = _series(get(values, c_series))
         rows[m[1]] = {
             "number": m[1],
             "stage": stage,
             "name": name,
-            "qty": max(plan - done, 0.0),
+            "qty": 0.0 if is_finished(status) else max(plan - done, 0.0),
             "qty_plan": plan,
             "qty_done": done,
-            "status": clean(get(values, c_status)),
+            "status": status,
             "line_1c": line_1c,
             "line_code": line_from_1c(line_1c),
             "started_at": _datetime(get(values, c_start)),
             "production_date": to_date(get(values, c_prod)),
             "doc_date": _datetime(m[2]),
+            "gp_series": series,
+            "gp_expiry": expiry,
+            "gp_name": clean(get(values, c_gp_name)),
             "_alt": use_alt,
         }
     return pd.DataFrame(list(rows.values()), columns=ORDER_COLUMNS)
+
+
+def _series(value) -> tuple[str | None, object]:
+    """«881126, 31.10.2029, РОССИЯ, Красногорсклексредства» → («881126», 2029-10-31)."""
+    parts = [p.strip() for p in (clean(value) or "").split(",")]
+    if not parts or not parts[0]:
+        return None, None
+    expiry = to_date(parts[1]) if len(parts) > 1 else None
+    return parts[0], expiry
 
 
 def _yes(value) -> bool:

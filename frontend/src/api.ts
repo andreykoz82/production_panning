@@ -21,6 +21,8 @@ export interface Snapshot {
     plan_to: string | null
     orders_stage1?: number
     orders_stage2: number
+    gp_in_transit?: number
+    gp_in_transit_qty?: number
     issues: Record<Severity, number>
   }
 }
@@ -97,6 +99,7 @@ export interface Stage2Line {
   plan_horizon: number
   gp_stock: number
   gp_on_certification: number
+  gp_in_transit?: number // выпущено, но не оприходовано на склад ГП (в старых расчётах нет)
   open_orders: number
   need: number
   min_batch: number
@@ -166,6 +169,8 @@ export interface PlanRun {
     stm_need_units?: number
     stm_feasible_units?: number
     month_factors: Record<string, number>
+    gp_in_transit_items?: number
+    gp_in_transit_units?: number
     warehouses?: Record<string, string[]>
   }
 }

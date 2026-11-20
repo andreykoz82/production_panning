@@ -66,6 +66,25 @@ def shelf_life_analysis(session: Session, p: ShelfLifeParams, item: str | None =
             {"item": t.item, "number": t.number, "qty": t.qty, "produced": produced, "available": available}
         )
 
+    # выпущено, но ещё не оприходовано на склад ГП: серия уже есть, продаём после сертификации
+    transit = session.scalars(
+        select(models.GpRelease).where(
+            models.GpRelease.snapshot_id == snapshot_id, models.GpRelease.in_transit.is_(True)
+        )
+    )
+    for r in transit:
+        made = r.production_date or p.calc_date
+        orders.append(
+            {
+                "item": r.item,
+                "number": f"{r.series or r.number} · не оприходовано",
+                "qty": r.qty,
+                "produced": made,
+                "available": max(p.calc_date, made + timedelta(days=GP_CERTIFICATION_DAYS)),
+                "expiry": r.expiry,
+            }
+        )
+
     result = analyze(items, lots, plan, orders, p)
     results: list[ItemResult] = result["results"]
 

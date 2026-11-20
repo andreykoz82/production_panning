@@ -13,6 +13,7 @@ import {
   Tabs,
   Text,
   TextInput,
+  Tooltip,
 } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
@@ -128,7 +129,7 @@ export default function Stage2Page() {
       <PageHeader
         title="Потребность 2 ступени"
         icon={<IconClipboardList size={24} />}
-        description="Сколько фасовать, чтобы обеспечить план продаж на N месяцев: план − запас ГП (склад ГП + опт) − открытые заказы, не меньше выпуска линии за 1 ч. Из текущего месяца — оставшиеся рабочие дни."
+        description="Сколько фасовать, чтобы обеспечить план продаж на N месяцев: план − запас ГП (склад ГП + опт + выпущено, но не оприходовано) − открытые заказы, не меньше выпуска линии за 1 ч. Из текущего месяца — оставшиеся рабочие дни."
         actions={
           run && (
             <Button
@@ -230,6 +231,12 @@ export default function Stage2Page() {
                 .join('; ')}
             </Text>
           )}
+          {!!s.gp_in_transit_units && (
+            <Text size="xs" c="dimmed">
+              Выпущено, но ещё не оприходовано на склад ГП: {s.gp_in_transit_items} поз.,{' '}
+              {num.format(s.gp_in_transit_units)} шт — учтено как запас (серия этапа ещё не появилась в остатках ГП)
+            </Text>
+          )}
           <Text size="xs" c="dimmed">
             Доля плана в горизонте:{' '}
             {Object.entries(s.month_factors)
@@ -321,7 +328,10 @@ export default function Stage2Page() {
                         <Table.Td>{l.abc}</Table.Td>
                         <Table.Td>{month(l.stockout_month)}</Table.Td>
                         <Table.Td ta="right">{num.format(l.plan_horizon)}</Table.Td>
-                        <Table.Td ta="right">{num.format(l.gp_stock)}</Table.Td>
+                        <Table.Td ta="right">
+                          {num.format(l.gp_stock)}
+                          <InTransit qty={l.gp_in_transit} />
+                        </Table.Td>
                         <Table.Td ta="right">{num.format(l.open_orders)}</Table.Td>
                         <Table.Td ta="right">
                           <Text size="sm" fw={600}>
@@ -395,7 +405,10 @@ export default function Stage2Page() {
                         <Table.Td>{l.abc}</Table.Td>
                         <Table.Td>{month(l.stockout_month)}</Table.Td>
                         <Table.Td ta="right">{num.format(l.plan_horizon)}</Table.Td>
-                        <Table.Td ta="right">{num.format(l.gp_stock)}</Table.Td>
+                        <Table.Td ta="right">
+                          {num.format(l.gp_stock)}
+                          <InTransit qty={l.gp_in_transit} />
+                        </Table.Td>
                         <Table.Td ta="right">
                           {l.open_orders > 0 ? (
                             <Badge color="violet">{num.format(l.open_orders)}</Badge>
@@ -565,5 +578,17 @@ export default function Stage2Page() {
         </>
       )}
     </Stack>
+  )
+}
+
+/** Выпущено на 2 ступени, но ещё не оприходовано на склад ГП — вычитается из потребности как запас */
+function InTransit({ qty }: { qty?: number }) {
+  if (!qty) return null
+  return (
+    <Tooltip label="Этап завершён, серия ещё не поступила на склад ГП — учтено как запас" withArrow>
+      <Text size="xs" c="teal.7" fw={600}>
+        + {num.format(qty)} не оприх.
+      </Text>
+    </Tooltip>
   )
 }

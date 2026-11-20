@@ -60,6 +60,8 @@ class PlanningData:
     specs: pd.DataFrame  # действующие версии: spec, component, characteristic, qty_per_1000
     plan: pd.DataFrame  # item, month, qty
     orders: pd.DataFrame  # number, item, qty, stage [, nfp, nfp_characteristic — для 1 ступени]
+    # выпущено на 2 ступени, но ещё не оприходовано на склад ГП: item, qty
+    in_transit: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=["item", "qty"]))
 
 
 @dataclass
@@ -105,6 +107,12 @@ class Stage2Result:
             "stm_needed": int((stm["need"] > 0).sum()),
             "stm_need_units": float(stm["need"].sum()),
             "stm_feasible_units": float(stm["feasible"].sum()),
+            "gp_in_transit_items": int((all_lines["gp_in_transit"] > 0).sum())
+            if "gp_in_transit" in all_lines
+            else 0,
+            "gp_in_transit_units": float(all_lines["gp_in_transit"].sum())
+            if "gp_in_transit" in all_lines
+            else 0.0,
             "month_factors": self.month_factors,
             "warehouses": self.warehouses,
         }
@@ -199,6 +207,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
     gp_cert = gp[gp["role"] == wh.GP_CERT].groupby("item")["available"].sum()
     orders = data.orders[(data.orders["stage"] == 2) & data.orders["item"].notna()]
     open_orders = orders.groupby("item")["qty"].sum()
+    transit = data.in_transit[data.in_transit["item"].notna()].groupby("item")["qty"].sum()
 
     # --- НФП: пулы по (наименование, фракция, назначение)
     nfp_rows = stock[stock["role"] == wh.NFP]
@@ -229,7 +238,8 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
         plan_h = sum(p.get(m, 0.0) * f for m, f in factors.items())
         stock_gp = float(gp_stock.get(it.name, 0.0))
         orders_q = float(open_orders.get(it.name, 0.0))
-        raw_need = plan_h - stock_gp - orders_q
+        transit_q = float(transit.get(it.name, 0.0))
+        raw_need = plan_h - stock_gp - transit_q - orders_q
         min_s, max_s = _positive(it.min_series), _positive(it.max_series)
         mb = max(_min_batch(it.line_group), min_s or 0.0)
         need, series = (0.0, 0) if raw_need <= 0 else _series_plan(raw_need, mb, min_s, max_s)
@@ -245,6 +255,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
                 "plan_horizon": round(plan_h, 1),
                 "gp_stock": stock_gp,
                 "gp_on_certification": float(gp_cert.get(it.name, 0.0)),
+                "gp_in_transit": transit_q,
                 "open_orders": orders_q,
                 "need": need,
                 "min_batch": round(mb, 1),
@@ -252,7 +263,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
                 "max_series": max_s,
                 "series": series,
                 "series_size": math.ceil(need / series) if series else 0,
-                "stockout_month": _stockout_month(stock_gp + orders_q, p, calc_date),
+                "stockout_month": _stockout_month(stock_gp + transit_q + orders_q, p, calc_date),
             }
         )
     lines = pd.DataFrame(rows)

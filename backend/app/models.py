@@ -104,6 +104,23 @@ class GpLot(_SnapshotRow, Base):
     report_date: Mapped[date | None] = mapped_column(Date)
 
 
+class GpRelease(_SnapshotRow, Base):
+    """Выпуск 2 ступени за последние недели (завершённые этапы) и поступил ли он на склад ГП."""
+
+    __tablename__ = "gp_release"
+
+    number: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(String(300))
+    item: Mapped[str | None] = mapped_column(String(300), index=True)
+    series: Mapped[str | None] = mapped_column(String(100))
+    expiry: Mapped[date | None] = mapped_column(Date)
+    qty: Mapped[float] = mapped_column(Float)
+    production_date: Mapped[date | None] = mapped_column(Date)
+    line_code: Mapped[str | None] = mapped_column(String(30))
+    received: Mapped[bool | None] = mapped_column(Boolean)  # серия есть в остатках ГП
+    in_transit: Mapped[bool] = mapped_column(Boolean)  # выпущено, не оприходовано — считаем запасом
+
+
 class SalesPlanRow(_SnapshotRow, Base):
     __tablename__ = "sales_plan_row"
 

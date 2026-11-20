@@ -15,6 +15,10 @@ MAX_SHIFTS_PER_DAY = 3
 CHANGEOVER_HOURS = {1: 5.0, 2: 1.0}
 NFP_QUARANTINE_WORKDAYS = 5
 GP_CERTIFICATION_DAYS = 7
+# Завершённый этап 2 ступени, серии которого ещё нет в остатках ГП, — «выпущено, не оприходовано».
+# Сколько дней после выпуска его так считаем (дальше — серия, видимо, уже продана целиком)
+GP_IN_TRANSIT_DAYS = 14
+GP_RELEASES_LOOKBACK_DAYS = 30  # завершённые этапы за этот срок показываем в списке выпуска
 
 
 @dataclass(frozen=True)

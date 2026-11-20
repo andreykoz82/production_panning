@@ -10,11 +10,12 @@ from app.importers.common import ReportFormatError
 from app.importers.gp_lots import LOT_COLUMNS, parse_gp_lots
 from app.importers.items import parse_items
 from app.importers.matching import match_items_to_specs, match_to_catalog
-from app.importers.orders import ORDER_COLUMNS, link_stage1_orders, parse_orders
+from app.importers.orders import ORDER_COLUMNS, is_finished, link_stage1_orders, parse_orders
 from app.importers.quality import Issue, check_quality
 from app.importers.sales_plan import parse_sales_plan
 from app.importers.specs import effective_specs, is_nfp_component, parse_specs, spec_products
 from app.importers.stock import parse_stock
+from app.reference.lines import GP_IN_TRANSIT_DAYS, GP_RELEASES_LOOKBACK_DAYS
 
 # Как узнаём файл по имени (без учёта регистра)
 FILE_PATTERNS = {
@@ -66,6 +67,20 @@ class SourceFiles:
         )
 
 
+RELEASE_COLUMNS = [
+    "number",
+    "name",
+    "item",
+    "series",
+    "expiry",
+    "qty",
+    "production_date",
+    "line_code",
+    "received",  # True/False; None — нет отчёта по сериям или серии в этапе, проверить нельзя
+    "in_transit",  # выпущено, но не оприходовано: учитываем как запас «в пути на склад»
+]
+
+
 @dataclass
 class ImportResult:
     items: pd.DataFrame
@@ -75,6 +90,8 @@ class ImportResult:
     sales_plan: pd.DataFrame
     orders: pd.DataFrame
     gp_lots: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=[*LOT_COLUMNS, "item"]))
+    # выпуск 2 ступени за последние недели: поступил ли на склад ГП (серия есть в остатках по сериям)
+    releases: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=RELEASE_COLUMNS))
     issues: list[Issue] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)
 
@@ -102,6 +119,11 @@ class ImportResult:
             "orders_stage1": int((self.orders["stage"] == 1).sum()),
             "orders_stage2": int((self.orders["stage"] == 2).sum()),
             "gp_lots": int(len(self.gp_lots)),
+            "gp_releases": int(len(self.releases)),
+            "gp_in_transit": int(self.releases["in_transit"].sum()) if len(self.releases) else 0,
+            "gp_in_transit_qty": float(self.releases.loc[self.releases["in_transit"], "qty"].sum())
+            if len(self.releases)
+            else 0.0,
             "warehouses": sorted(self.stock["warehouse"].unique().tolist()),
             "issues": {
                 sev: sum(1 for i in self.issues if i.severity == sev) for sev in ("error", "warning", "info")
@@ -173,6 +195,11 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
     stock["item"] = match_to_catalog(stock["name"], catalog)
     gp_lots["item"] = match_to_catalog(gp_lots["name"], catalog)
 
+    # Завершённые этапы — не заказы; по 2 ступени из них — выпуск, который мог не дойти до склада ГП
+    finished = orders["status"].map(is_finished)
+    releases = _releases(orders[finished & (orders["stage"] == 2)], gp_lots, catalog, today or date.today())
+    orders = orders[~finished].reset_index(drop=True)
+
     result = ImportResult(
         items=items,
         stock=stock,
@@ -181,6 +208,7 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
         sales_plan=plan,
         orders=orders,
         gp_lots=gp_lots,
+        releases=releases,
         files={
             "items": files.items.name,
             "stock": files.stock.name,
@@ -191,7 +219,58 @@ def import_sources(files: SourceFiles, today: date | None = None) -> ImportResul
         },
     )
     result.issues = check_quality(result, today=today or date.today())
+    for r in releases[releases["in_transit"]].itertuples(index=False):
+        result.issues.append(
+            Issue(
+                "info",
+                "orders",
+                r.item or r.name,
+                f"Этап {r.number} завершён {r.production_date:%d.%m.%Y}, серия {r.series} ({r.qty:,.0f} шт) "
+                "ещё не поступила на склад ГП — в расчётах учтена как «не оприходовано»".replace(",", " "),
+            )
+        )
     return result
+
+
+def _releases(finished: pd.DataFrame, gp_lots: pd.DataFrame, catalog: pd.Series, today: date) -> pd.DataFrame:
+    """Выпуск 2 ступени за последние недели и поступил ли он на склад ГП.
+
+    Поступил — серия этапа («Серия ГП») есть в отчёте «Остатки ГП со сроками годности».
+    Нет серии в остатках и выпуск свежий (не старше GP_IN_TRANSIT_DAYS) — продукция выпущена,
+    но не оприходована: в расчётах она считается запасом ГП «в пути на склад».
+    """
+    if not len(finished):
+        return pd.DataFrame(columns=RELEASE_COLUMNS)
+    day = finished["production_date"].where(
+        finished["production_date"].notna(),
+        finished["started_at"].map(lambda t: t.date() if pd.notna(t) else None),
+    )
+    recent = finished[day.map(lambda d: d is not None and (today - d).days <= GP_RELEASES_LOOKBACK_DAYS)]
+    if not len(recent):
+        return pd.DataFrame(columns=RELEASE_COLUMNS)
+    day = day[recent.index]
+    by_gp_name = match_to_catalog(recent["gp_name"].fillna(""), catalog)
+    lot_series = set(gp_lots["series"].dropna().astype(str)) if len(gp_lots) else None
+    out = pd.DataFrame(
+        {
+            "number": recent["number"],
+            "name": recent["gp_name"].fillna(recent["name"]),
+            "item": by_gp_name.fillna(recent["item"]),
+            "series": recent["gp_series"],
+            "expiry": recent["gp_expiry"],
+            "qty": recent["qty_done"].where(recent["qty_done"] > 0, recent["qty_plan"]),
+            "production_date": day,
+            "line_code": recent["line_code"],
+        }
+    )
+    out["received"] = [
+        None if lot_series is None or pd.isna(s) or not s else s in lot_series for s in out["series"]
+    ]
+    out["in_transit"] = [
+        r is False and (today - d).days <= GP_IN_TRANSIT_DAYS and q > 0
+        for r, d, q in zip(out["received"], out["production_date"], out["qty"], strict=True)
+    ]
+    return out.sort_values(["production_date", "number"], ascending=[False, True]).reset_index(drop=True)
 
 
 def import_folder(folder: Path | str, today: date | None = None) -> ImportResult:
