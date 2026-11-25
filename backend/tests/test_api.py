@@ -291,3 +291,18 @@ def test_print_order_year_boundary(client, data_dir):
     for row in order["rows"]:
         assert len(row["monthly"]) == 3
         assert sum(row["monthly"]) == pytest.approx(row["demand"], abs=0.00001)
+
+
+def test_print_order_finished_goods(client, data_dir):
+    snapshot = client.post("/api/imports/from-folder").json()
+    params = {"calc_date": snapshot["created_at"][:10]}
+    url = "/api/planning/print-order"
+    base = {r["key"]: r["stock"] for r in client.get(url, params=params).json()["rows"]}
+    rows = client.get(url, params={**params, "include_gp": True}).json()["rows"]
+    assert any(r["gp_stock"] > 0 for r in rows)
+    for r in rows:
+        assert r["stock"] == pytest.approx(base[r["key"]] + r["gp_stock"])
+        if r["group"] == "Вкладыши":
+            assert r["gp_stock"] == 0
+    assert {"Пачки", "Ярлыки", "Конверты"} == {r["group"] for r in rows if r["gp_stock"] > 0}
+    assert not any("будь здоров" in r["name"].lower() for r in rows)

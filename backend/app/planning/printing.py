@@ -4,7 +4,7 @@ import re
 
 from app.importers.specs import analog_key
 from app.planning.calendar import add_months
-from app.reference.warehouses import MATERIALS
+from app.reference.warehouses import GP_ROLES, MATERIALS
 
 
 def material_group(name):
@@ -16,11 +16,12 @@ def material_group(name):
     return None
 
 
-def print_requirements(data, calc_date, horizon):
+def print_requirements(data, calc_date, horizon, include_gp=False):
     start = calc_date.replace(day=1)
     months = [add_months(start, offset) for offset in range(1, horizon + 1)]
     plan = data.plan[data.plan.month.isin(months)]
     items = data.items[data.items.in_scope == True][["name", "spec"]]  # noqa: E712
+    items = items[~items.name.str.contains(r"будь\s+здоров", case=False, na=False)]
     sales = plan.groupby("item").qty.sum()
     planned = items.merge(sales, left_on="name", right_index=True)
     missing_specs = planned.loc[~planned.spec.isin(data.specs.spec) & (planned.qty > 0), "name"].tolist()
@@ -42,6 +43,15 @@ def print_requirements(data, calc_date, horizon):
     usage["demand"] = usage.qty.fillna(0) * usage.qty_per_1000 / 1000
     stock = data.stock[data.stock.role == MATERIALS]
     balances = stock.groupby(stock.name.map(analog_key)).available.sum()
+    gp_by_material = {}
+    if include_gp:
+        gp = data.stock[data.stock.role.isin(GP_ROLES) & ~data.stock.is_defect]
+        available = gp.groupby("item").available.sum().clip(lower=0)
+        credited = norms[norms.group.isin(["Пачки", "Конверты", "Ярлыки"])].copy()
+        credited["per_unit"] = credited.qty_per_1000 / 1000
+        credited.loc[credited.group == "Пачки", "per_unit"] = 1
+        credited["qty"] = credited.name.map(available).fillna(0) * credited.per_unit
+        gp_by_material = credited.groupby("key").qty.sum()
     rows = []
     for key, parts in usage.groupby("key"):
         horizon_parts = parts[parts.month.isin(months)]
@@ -58,7 +68,8 @@ def print_requirements(data, calc_date, horizon):
                 products=breakdown[breakdown.sales > 0].to_dict("records"),
                 future=[float(monthly.get(m, 0)) if m in planned_months else None for m in calendar],
                 monthly=monthly.reindex(months, fill_value=0).round(6).tolist(),
-                stock=float(balances.get(key, 0)),
+                gp_stock=float(gp_by_material.get(key, 0)),
+                stock=float(balances.get(key, 0)) + float(gp_by_material.get(key, 0)),
             )
         )
     return dict(
