@@ -288,3 +288,6 @@ def test_print_order_year_boundary(client, data_dir):
     assert not order["missing_months"]
     assert {r["group"] for r in order["rows"]} == {"Пачки", "Конверты", "Ярлыки", "Вкладыши"}
     assert any(r["demand"] > r["stock"] for r in order["rows"])
+    for row in order["rows"]:
+        assert len(row["monthly"]) == 3
+        assert sum(row["monthly"]) == pytest.approx(row["demand"], abs=0.00001)
