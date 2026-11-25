@@ -17,6 +17,7 @@ import { lazy, Suspense, useState, type ReactNode } from 'react'
 import CalendarsPage from './pages/CalendarsPage'
 import ImportPage from './pages/ImportPage'
 import LinesPage from './pages/LinesPage'
+import PrintOrderPage from './pages/PrintOrderPage'
 import Stage2Page from './pages/Stage2Page'
 import WarehousesPage from './pages/WarehousesPage'
 
@@ -35,6 +36,7 @@ const SECTIONS: { title: string; pages: Page[] }[] = [
     title: '2 ступень · фасовка',
     pages: [
       { key: 'stage2', label: 'Потребность', icon: <IconClipboardList size={18} />, element: <Stage2Page /> },
+      { key: 'printing', label: 'Заказ в типографию', icon: <IconClipboardList size={18} />, element: <PrintOrderPage /> },
       { key: 'gantt', label: 'График производства', icon: <IconTimeline size={18} />, element: <GanttPage /> },
       { key: 'shelf', label: 'Сроки годности ГП', icon: <IconHourglass size={18} />, element: <ShelfLifePage /> },
     ],
