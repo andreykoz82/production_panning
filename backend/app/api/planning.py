@@ -1,6 +1,6 @@
 """API расчёта потребности."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
 
@@ -79,13 +79,15 @@ def export_run(run_id: int, session: SessionDep):
 
 
 @router.get("/print-order")
-def print_order(session: SessionDep, calc_date: date, months: int = Query(3, ge=3, le=24)):
-    snapshot = session.scalar(
-        select(models.ImportSnapshot).order_by(models.ImportSnapshot.id.desc()).limit(1)
-    )
+def print_order(session: SessionDep, calc_date: date, months: int = Query(3, ge=3, le=24), include_gp: bool = False):
+    query = select(models.ImportSnapshot)
+    if include_gp:
+        query = query.where(models.ImportSnapshot.created_at < calc_date + timedelta(days=1))
+    snapshot = session.scalar(query.order_by(models.ImportSnapshot.id.desc()).limit(1))
     if snapshot is None:
-        raise HTTPException(404, "Сначала загрузите выгрузки 1С")
+        raise HTTPException(404, "Нет снимка остатков на выбранную дату")
     return {
         "snapshot": snapshot.id,
-        **print_requirements(load_planning_data(session, snapshot.id), calc_date, months),
+        "snapshot_date": snapshot.created_at.date(),
+        **print_requirements(load_planning_data(session, snapshot.id), calc_date, months, include_gp),
     }

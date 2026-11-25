@@ -4,7 +4,7 @@ import re
 
 from app.importers.specs import analog_key
 from app.planning.calendar import add_months
-from app.reference.warehouses import MATERIALS
+from app.reference.warehouses import GP_ROLES, MATERIALS
 
 
 def material_group(name):
@@ -16,7 +16,7 @@ def material_group(name):
     return None
 
 
-def print_requirements(data, calc_date, horizon):
+def print_requirements(data, calc_date, horizon, include_gp=False):
     start = calc_date.replace(day=1)
     months = [add_months(start, offset) for offset in range(1, horizon + 1)]
     plan = data.plan[data.plan.month.isin(months)]
@@ -42,6 +42,12 @@ def print_requirements(data, calc_date, horizon):
     usage["demand"] = usage.qty.fillna(0) * usage.qty_per_1000 / 1000
     stock = data.stock[data.stock.role == MATERIALS]
     balances = stock.groupby(stock.name.map(analog_key)).available.sum()
+    gp_by_pack = {}
+    if include_gp:
+        gp = data.stock[data.stock.role.isin(GP_ROLES) & ~data.stock.is_defect]
+        available = gp.groupby("item").available.sum().clip(lower=0)
+        packs = norms.loc[norms.group == "Пачки", ["key", "name"]].drop_duplicates()
+        gp_by_pack = packs.assign(qty=packs.name.map(available).fillna(0)).groupby("key").qty.sum()
     rows = []
     for key, parts in usage.groupby("key"):
         horizon_parts = parts[parts.month.isin(months)]
@@ -58,7 +64,8 @@ def print_requirements(data, calc_date, horizon):
                 products=breakdown[breakdown.sales > 0].to_dict("records"),
                 future=[float(monthly.get(m, 0)) if m in planned_months else None for m in calendar],
                 monthly=monthly.reindex(months, fill_value=0).round(6).tolist(),
-                stock=float(balances.get(key, 0)),
+                gp_stock=float(gp_by_pack.get(key, 0)),
+                stock=float(balances.get(key, 0)) + float(gp_by_pack.get(key, 0)),
             )
         )
     return dict(

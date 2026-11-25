@@ -1,8 +1,8 @@
-import { Alert, Button, Group, Loader, NumberInput, Paper, Stack, Table, Text, TextInput, Title } from '@mantine/core'
+import { Alert, Button, Checkbox, Group, Loader, NumberInput, Paper, Stack, Table, Text, TextInput, Title } from '@mantine/core'
 import { Fragment, useEffect, useState } from 'react'
 
-type Row = { key: string; name: string; group: string; stock: number; demand: number; monthly: number[]; future: (number | null)[]; products: { name: string; sales: number; qty_per_1000: number; demand: number }[] }
-type Calculation = { calendar: string[]; months: string[]; target: string; rows: Row[]; snapshot: number; missing_months: string[]; missing_specs: string[] }
+type Row = { key: string; name: string; group: string; stock: number; gp_stock: number; demand: number; monthly: number[]; future: (number | null)[]; products: { name: string; sales: number; qty_per_1000: number; demand: number }[] }
+type Calculation = { calendar: string[]; months: string[]; target: string; rows: Row[]; snapshot: number; snapshot_date: string; missing_months: string[]; missing_specs: string[] }
 const groups = ['Пачки', 'Конверты', 'Ярлыки', 'Вкладыши']
 const month = (date: string) => new Date(date + 'T12:00:00').toLocaleDateString('ru', { month: 'long', year: 'numeric' })
 const format = (n: number) => n.toLocaleString('ru')
@@ -64,7 +64,7 @@ function Order({ data }: { data: Calculation }) {
   }
   return <Stack>
     <Title order={3}>Заказ на {month(data.target)}</Title>
-    <Text>Снимок №{data.snapshot}. Расход за период {month(data.months[0])} — {month(data.months[data.months.length - 1])}. Все количества в штуках.</Text>
+    <Text>Снимок №{data.snapshot} от {data.snapshot_date}. Расход за период {month(data.months[0])} — {month(data.months[data.months.length - 1])}. Все количества в штуках.</Text>
     {data.missing_months.length > 0 && <Alert color="red">В плане продаж отсутствуют месяцы: {data.missing_months.map(month).join(', ')}. Загрузите полный план.</Alert>}
     {data.missing_specs.length > 0 && <Alert color="orange">В расход не вошли изделия без спецификации: {data.missing_specs.join(', ')}</Alert>}
     <Text size="sm">В поступление внесите только ещё не оприходованную часть предыдущего заказа. Ввод сохраняется в этом браузере по месяцу поступления.</Text>
@@ -85,7 +85,7 @@ function Order({ data }: { data: Calculation }) {
             const periods = forecast(r, data, receipt, order)
             const last = periods[periods.length - 1]
             const open = expanded === r.key
-            return <Fragment key={r.key}><Table.Tr><Table.Td>{r.name}</Table.Td><Table.Td>{format(r.stock)}</Table.Td>
+            return <Fragment key={r.key}><Table.Tr><Table.Td>{r.name}</Table.Td><Table.Td>{format(r.stock)}{r.gp_stock > 0 && <Text size="xs">Пачки {format(r.stock - r.gp_stock)} + ГП {format(r.gp_stock)}</Text>}</Table.Td>
             <Table.Td><NumberInput aria-label={'Поступление ' + r.name} w={130} min={0} allowNegative={false} allowDecimal={false}
               value={receipts[r.key] || ''} placeholder="0" onChange={v => update(r.key, Number(v) || 0)} /></Table.Td>
             <Table.Td>{units(r.demand)}</Table.Td><Table.Td fw={700}>{format(order)}</Table.Td>
@@ -108,6 +108,7 @@ function Order({ data }: { data: Calculation }) {
 
 export default function PrintOrderPage() {
   const [date, setDate] = useState(() => new Date().toLocaleDateString('sv-SE'))
+  const [includeGp, setIncludeGp] = useState(false)
   const [months, setMonths] = useState<string | number>(3)
   const [data, setData] = useState<Calculation>()
   const [error, setError] = useState('')
@@ -116,17 +117,18 @@ export default function PrintOrderPage() {
     const controller = new AbortController()
     setData(undefined)
     setError('')
-    if (valid) fetch('/api/planning/print-order?calc_date=' + date + '&months=' + months, { signal: controller.signal })
+    if (valid) fetch('/api/planning/print-order?calc_date=' + date + '&months=' + months + '&include_gp=' + includeGp, { signal: controller.signal })
       .then(async res => {
         const result = await res.json()
         if (!res.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Ошибка расчёта')
         if (!controller.signal.aborted) setData(result)
       }).catch(e => { if (!controller.signal.aborted) setError(e.message) })
     return () => controller.abort()
-  }, [date, months, valid])
+  }, [date, months, valid, includeGp])
   return <Stack><Title order={2}>Заказ в типографию</Title>
     <Group align="end"><TextInput label="Дата формирования" type="date" value={date} onChange={e => setDate(e.target.value)} />
-      <NumberInput label="Месяцев продаж со следующего месяца" value={months} onChange={setMonths} min={3} max={24} allowDecimal={false} /></Group>
+      <NumberInput label="Месяцев продаж со следующего месяца" value={months} onChange={setMonths} min={3} max={24} allowDecimal={false} />
+      <Checkbox label="Учитывать остатки готовой продукции для пачек" checked={includeGp} onChange={e => setIncludeGp(e.currentTarget.checked)} /></Group>
     {!valid ? <Text>Укажите дату и горизонт от 3 до 24 месяцев.</Text> : error ? <Alert color="red">{error}</Alert> : data ? <Order key={data.months[0]} data={data} /> : <Loader />}
   </Stack>
 }
