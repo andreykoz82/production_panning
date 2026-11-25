@@ -302,5 +302,7 @@ def test_print_order_finished_goods(client, data_dir):
     assert any(r["gp_stock"] > 0 for r in rows)
     for r in rows:
         assert r["stock"] == pytest.approx(base[r["key"]] + r["gp_stock"])
-        if r["group"] != "Пачки":
+        if r["group"] == "Вкладыши":
             assert r["gp_stock"] == 0
+    assert {"Пачки", "Ярлыки", "Конверты"} == {r["group"] for r in rows if r["gp_stock"] > 0}
+    assert not any("будь здоров" in r["name"].lower() for r in rows)

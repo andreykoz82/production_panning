@@ -85,7 +85,7 @@ function Order({ data }: { data: Calculation }) {
             const periods = forecast(r, data, receipt, order)
             const last = periods[periods.length - 1]
             const open = expanded === r.key
-            return <Fragment key={r.key}><Table.Tr><Table.Td>{r.name}</Table.Td><Table.Td>{format(r.stock)}{r.gp_stock > 0 && <Text size="xs">Пачки {format(r.stock - r.gp_stock)} + ГП {format(r.gp_stock)}</Text>}</Table.Td>
+            return <Fragment key={r.key}><Table.Tr><Table.Td>{r.name}</Table.Td><Table.Td>{format(r.stock)}{r.gp_stock > 0 && <Text size="xs">Материал {format(r.stock - r.gp_stock)} + ГП {format(r.gp_stock)}</Text>}</Table.Td>
             <Table.Td><NumberInput aria-label={'Поступление ' + r.name} w={130} min={0} allowNegative={false} allowDecimal={false}
               value={receipts[r.key] || ''} placeholder="0" onChange={v => update(r.key, Number(v) || 0)} /></Table.Td>
             <Table.Td>{units(r.demand)}</Table.Td><Table.Td fw={700}>{format(order)}</Table.Td>
@@ -128,7 +128,7 @@ export default function PrintOrderPage() {
   return <Stack><Title order={2}>Заказ в типографию</Title>
     <Group align="end"><TextInput label="Дата формирования" type="date" value={date} onChange={e => setDate(e.target.value)} />
       <NumberInput label="Месяцев продаж со следующего месяца" value={months} onChange={setMonths} min={3} max={24} allowDecimal={false} />
-      <Checkbox label="Учитывать остатки готовой продукции для пачек" checked={includeGp} onChange={e => setIncludeGp(e.currentTarget.checked)} /></Group>
+      <Checkbox label="Учитывать остатки готовой продукции для пачек, конвертов и ярлыков" checked={includeGp} onChange={e => setIncludeGp(e.currentTarget.checked)} /></Group>
     {!valid ? <Text>Укажите дату и горизонт от 3 до 24 месяцев.</Text> : error ? <Alert color="red">{error}</Alert> : data ? <Order key={data.months[0]} data={data} /> : <Loader />}
   </Stack>
 }
