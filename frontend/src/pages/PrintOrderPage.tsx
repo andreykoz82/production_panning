@@ -1,5 +1,7 @@
-import { Alert, Button, Checkbox, Group, Loader, NumberInput, Paper, Stack, Table, Text, TextInput, Title } from '@mantine/core'
+import { Alert, Button, Checkbox, FileButton, Group, Loader, NumberInput, Paper, Stack, Table, Text, TextInput, Title } from '@mantine/core'
 import { Fragment, useEffect, useState } from 'react'
+
+import { readReceipts, saveTemplate } from './printReceipts'
 
 type Row = { key: string; name: string; group: string; stock: number; gp_stock: number; demand: number; monthly: number[]; future: (number | null)[]; products: { name: string; sales: number; qty_per_1000: number; demand: number }[] }
 type Calculation = { calendar: string[]; months: string[]; target: string; rows: Row[]; snapshot: number; snapshot_date: string; missing_months: string[]; missing_specs: string[] }
@@ -42,10 +44,25 @@ function Order({ data }: { data: Calculation }) {
   const [receipts, setReceipts] = useState<Record<string, number>>(() => JSON.parse(localStorage.getItem(storage) || '{}'))
   const [expanded, setExpanded] = useState<string | null>(null)
   const quantity = (r: Row) => Math.max(0, Math.ceil((r.demand - r.stock - (receipts[r.key] || 0)) / lotSize)) * lotSize
-  const update = (key: string, value: number) => {
-    const next = { ...receipts, [key]: value }
-    localStorage.setItem(storage, JSON.stringify(next))
-    setReceipts(next)
+  const [message, setMessage] = useState('')
+  const [failed, setFailed] = useState(false)
+  const [loadingFile, setLoadingFile] = useState(false)
+  const period = data.months[0].slice(0, 7)
+  const upload = async (file: File | null) => {
+    if (!file) return
+    setLoadingFile(true)
+    try {
+      const next = await readReceipts(file, data.rows, period)
+      localStorage.setItem(storage, JSON.stringify(next))
+      setReceipts(next)
+      setFailed(false)
+      setMessage(file.name + ' · загружено материалов: ' + Object.keys(next).length)
+    } catch (error) {
+      setFailed(true)
+      setMessage(error instanceof Error ? error.message : 'Ошибка чтения файла')
+    } finally {
+      setLoadingFile(false)
+    }
   }
   const exportOrder = () => {
     const lines = [['Тип материала', 'Материал', 'К заказу, шт.']]
@@ -67,7 +84,10 @@ function Order({ data }: { data: Calculation }) {
     <Text>Снимок №{data.snapshot} от {data.snapshot_date}. Расход за период {month(data.months[0])} — {month(data.months[data.months.length - 1])}. Все количества в штуках.</Text>
     {data.missing_months.length > 0 && <Alert color="red">В плане продаж отсутствуют месяцы: {data.missing_months.map(month).join(', ')}. Загрузите полный план.</Alert>}
     {data.missing_specs.length > 0 && <Alert color="orange">В расход не вошли изделия без спецификации: {data.missing_specs.join(', ')}</Alert>}
-    <Text size="sm">В поступление внесите только ещё не оприходованную часть предыдущего заказа. Ввод сохраняется в этом браузере по месяцу поступления.</Text>
+    <Text size="sm">Заполните в шаблоне ожидаемые поступления за {month(data.months[0])}. Загрузка заменяет все поступления этого месяца в текущем браузере. Пустое количество означает ноль.</Text>
+    <Group><Button variant="light" onClick={() => saveTemplate(data.rows, period).catch(() => { setFailed(true); setMessage('Не удалось скачать шаблон') })}>Скачать шаблон Excel</Button>
+      <FileButton accept=".xlsx" onChange={upload}>{props => <Button {...props} loading={loadingFile}>Загрузить поступления</Button>}</FileButton></Group>
+    {message && <Alert color={failed ? 'red' : 'green'}>{message}</Alert>}
     <Text size="sm">Расход рассчитан по плану продаж и нормам материалов на 1 000 изделий. Дефицит округляется вверх до партии 10 000 шт. Дни запаса считаются со следующего месяца по будущему плану продаж. Внутри месяца расход распределён равномерно. Знак «≥» означает, что запас покрывает весь доступный непрерывный план.</Text>
     <Button w="fit-content" disabled={!!data.missing_months.length || !data.rows.some(r => quantity(r) > 0)} onClick={exportOrder}>Скачать заказ (CSV)</Button>
     {data.rows.length === 0 && <Text>В спецификациях не найдены печатные материалы выбранных типов.</Text>}
@@ -86,8 +106,7 @@ function Order({ data }: { data: Calculation }) {
             const last = periods[periods.length - 1]
             const open = expanded === r.key
             return <Fragment key={r.key}><Table.Tr><Table.Td>{r.name}</Table.Td><Table.Td>{format(r.stock)}{r.gp_stock > 0 && <Text size="xs">Материал {format(r.stock - r.gp_stock)} + ГП {format(r.gp_stock)}</Text>}</Table.Td>
-            <Table.Td><NumberInput aria-label={'Поступление ' + r.name} w={130} min={0} allowNegative={false} allowDecimal={false}
-              value={receipts[r.key] || ''} placeholder="0" onChange={v => update(r.key, Number(v) || 0)} /></Table.Td>
+            <Table.Td>{format(receipt)}</Table.Td>
             <Table.Td>{units(r.demand)}</Table.Td><Table.Td fw={700}>{format(order)}</Table.Td>
             <Table.Td>{units(last.balance)}</Table.Td><Table.Td>{last.coverage}</Table.Td>
             <Table.Td><Button size="compact-xs" variant="subtle" aria-expanded={open} onClick={() => setExpanded(open ? null : r.key)}>{open ? 'Свернуть' : 'Подробнее'}</Button></Table.Td></Table.Tr>
