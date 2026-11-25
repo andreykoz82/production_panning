@@ -15,7 +15,7 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   IconAlertTriangle,
@@ -28,7 +28,7 @@ import {
   IconPackages,
 } from '@tabler/icons-react'
 
-import { planningApi, type MaterialLine, type PlanRun, type PlanRunDetail, type Stage2Status } from '../api'
+import { planningApi, type PlanRun, type PlanRunDetail, type Stage2Line, type Stage2Status } from '../api'
 import { PageHeader, Section, StatCard } from '../ui'
 
 const num = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -55,6 +55,52 @@ const STATUS_COLOR: Record<Stage2Status, string> = {
   'Нет данных': 'gray',
   'Не требуется': 'gray',
 }
+
+const lineOrder = ['Линия ББЛ', 'Линия ИМА С 50', 'Линия ИМА С 21', 'Линия Консумаш']
+
+function lineRank(name: string) {
+  const index = lineOrder.indexOf(name)
+  return index < 0 ? lineOrder.length : index
+}
+
+function compareGroups(a: string, b: string) {
+  return lineRank(a) - lineRank(b) || a.localeCompare(b, 'ru')
+}
+
+function grouped<T>(rows: T[], group: (row: T) => string) {
+  const groups = new Map<string, T[]>()
+  for (const row of rows) {
+    const name = group(row)
+    const items = groups.get(name)
+    if (items) items.push(row)
+    else groups.set(name, [row])
+  }
+  return [...groups.entries()].sort(([a], [b]) => compareGroups(a, b))
+}
+
+function groupRows<T>(rows: T[], group: (row: T) => string, columns: number, render: (row: T) => ReactNode) {
+  return grouped(rows, group).map(([name, items]) => (
+    <Fragment key={name}>
+      <Table.Tr bg="var(--mantine-color-default-hover)">
+        <Table.Th colSpan={columns}>{name}</Table.Th>
+      </Table.Tr>
+      {items.map(render)}
+    </Fragment>
+  ))
+}
+
+function limits(line: Stage2Line) {
+  return line.limit?.split('\n').map((name) => (
+    <Text size="sm" key={name}>
+      {name === 'НФП'
+        ? `НФП: есть ${kg.format(line.nfp_available_kg)} из ${kg.format(line.nfp_need_kg)} кг` +
+          (line.nfp_quarantine_kg > 0 ? `, на карантине ${kg.format(line.nfp_quarantine_kg)} кг` : '')
+        : name}
+    </Text>
+  ))
+}
+
+const productGroup = (line: Stage2Line) => line.line_group || 'Линия не указана'
 
 export default function Stage2Page() {
   const [horizon, setHorizon] = useState<number>(3)
@@ -109,17 +155,15 @@ export default function Stage2Page() {
     return c
   }, [scoped])
   const [matScope, setMatScope] = useState<'short' | 'all'>('short')
-  const materialGroups = useMemo(() => {
-    if (!run) return [] as [string, MaterialLine[]][]
-    const groups = new Map<string, MaterialLine[]>()
-    for (const m of run.materials) {
-      if (matScope === 'short' && !(m.shortage > 0 || m.within_tolerance)) continue
-      const kind = m.kind ?? 'Прочее'
-      groups.set(kind, [...(groups.get(kind) ?? []), m])
-    }
-    // порядок групп и строк задаёт сервер (вид номенклатуры, затем величина дефицита)
-    return [...groups.entries()]
-  }, [run, matScope])
+  const lineByProduct = useMemo(() => new Map(run?.lines.map((line) => [line.item, productGroup(line)])), [run])
+  const resourceGroup = useCallback((names: string) => {
+    const lines = names.split('; ').map((name) => lineByProduct.get(name) ?? 'Линия не указана')
+    return [...new Set(lines)].sort(compareGroups).join(' + ')
+  }, [lineByProduct])
+  const materialGroups = useMemo(() => grouped(
+    (run?.materials ?? []).filter((m) => matScope === 'all' || m.shortage > 0 || m.within_tolerance),
+    (m) => resourceGroup(m.item_names),
+  ), [run, matScope, resourceGroup])
   const stmLines = useMemo(() => (run ? run.lines.filter((l) => l.stm) : []), [run])
 
   const s = run?.summary
@@ -316,14 +360,11 @@ export default function Stage2Page() {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {lines.map((l) => (
+                    {groupRows(lines, productGroup, 11, (l) => (
                       <Table.Tr key={l.item}>
                         <Table.Td>{l.priority}</Table.Td>
                         <Table.Td>
                           <Text size="sm">{l.item}</Text>
-                          <Text size="xs" c="dimmed">
-                            {l.line_group}
-                          </Text>
                         </Table.Td>
                         <Table.Td>{l.abc}</Table.Td>
                         <Table.Td>{month(l.stockout_month)}</Table.Td>
@@ -355,14 +396,7 @@ export default function Stage2Page() {
                           </Badge>
                         </Table.Td>
                         <Table.Td>
-                          {l.limit === 'НФП' ? (
-                            <Text size="sm">
-                              НФП: есть {kg.format(l.nfp_available_kg)} из {kg.format(l.nfp_need_kg)} кг
-                              {l.nfp_quarantine_kg > 0 && `, на карантине ${kg.format(l.nfp_quarantine_kg)}`}
-                            </Text>
-                          ) : (
-                            <Text size="sm">{l.limit ?? ''}</Text>
-                          )}
+                          {limits(l)}
                         </Table.Td>
                       </Table.Tr>
                     ))}
@@ -394,13 +428,10 @@ export default function Stage2Page() {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {stmLines.map((l) => (
+                    {groupRows(stmLines, productGroup, 9, (l) => (
                       <Table.Tr key={l.item}>
                         <Table.Td>
                           <Text size="sm">{l.item}</Text>
-                          <Text size="xs" c="dimmed">
-                            {l.line_group}
-                          </Text>
                         </Table.Td>
                         <Table.Td>{l.abc}</Table.Td>
                         <Table.Td>{month(l.stockout_month)}</Table.Td>
@@ -423,13 +454,7 @@ export default function Stage2Page() {
                         </Table.Td>
                         <Table.Td ta="right">{l.need > 0 ? num.format(l.feasible) : '—'}</Table.Td>
                         <Table.Td>
-                          {l.limit === 'НФП' ? (
-                            <Text size="sm">
-                              НФП: осталось {kg.format(l.nfp_available_kg)} из {kg.format(l.nfp_need_kg)} кг
-                            </Text>
-                          ) : (
-                            <Text size="sm">{l.limit ?? ''}</Text>
-                          )}
+                          {limits(l)}
                         </Table.Td>
                       </Table.Tr>
                     ))}
@@ -449,20 +474,20 @@ export default function Stage2Page() {
                   ]}
                 />
                 <Text size="xs" c="dimmed">
-                  Сгруппировано по виду номенклатуры из 1С; нехватка до 10 % — не дефицит
+                  Общие материалы показаны один раз для всех использующих их линий. Допуск по нехватке — 10 %.
                 </Text>
               </Group>
               {materialGroups.length === 0 && <Text c="dimmed">Дефицита материалов нет.</Text>}
               <Stack gap="md">
-                {materialGroups.map(([kind, items]) => {
+                {materialGroups.map(([group, items]) => {
                   const short = items.filter((m) => m.shortage > 0).length
                   return (
                     <Section
-                      key={kind}
+                      key={group}
                       p={0}
                       title={
                         <Group gap="xs" px="md" pt="sm">
-                          <Text fw={650}>{kind}</Text>
+                          <Text fw={650}>{group}</Text>
                           <Badge color={short ? 'red' : 'gray'}>
                             {short ? `дефицит: ${short}` : `${items.length}`}
                           </Badge>
@@ -493,6 +518,7 @@ export default function Stage2Page() {
                             <Table.Tr key={m.material} opacity={m.within_tolerance ? 0.75 : 1}>
                               <Table.Td>
                                 {m.material}
+                                <Text size="xs" c="dimmed">{m.kind}</Text>
                                 {m.within_tolerance && (
                                   <Badge ml="xs" size="xs" color="gray">
                                     в пределах 10 %
@@ -541,7 +567,7 @@ export default function Stage2Page() {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {run.nfp.map((n) => (
+                    {groupRows(run.nfp, (n) => resourceGroup(n.items), 9, (n) => (
                       <Table.Tr key={`${n.nfp}|${n.characteristic}|${n.purpose}`}>
                         <Table.Td>{n.nfp}</Table.Td>
                         <Table.Td>

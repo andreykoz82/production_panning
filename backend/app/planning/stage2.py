@@ -351,9 +351,7 @@ def calculate_stage2(data: PlanningData, params: Stage2Params) -> Stage2Result:
             feasible = float(min(row.need, math.floor(cap)))
             if feasible < row.min_batch:
                 feasible = 0.0
-            limit_name = None
-            if feasible < row.need and limits:
-                limit_name = min(limits, key=limits.get)
+            limit_name = "\n".join(name for name, capacity in limits.items() if capacity < row.need) or None
             # списываем то, что реально выпустим
             if purchased:
                 purchased_pool.take(row.nfp, feasible * norm)

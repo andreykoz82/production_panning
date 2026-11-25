@@ -109,6 +109,8 @@ def _sheet(wb: Workbook, title: str, columns, rows: list[dict], status_col: str 
     for r, rec in enumerate(rows, start=2):
         for col, (_header, key, _width, fmt) in enumerate(columns, start=1):
             cell = ws.cell(row=r, column=col, value=_value(rec.get(key), fmt))
+            if key == "limit":
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
             if fmt == "month":
                 cell.number_format = "mm.yyyy"
             elif fmt == "date":
