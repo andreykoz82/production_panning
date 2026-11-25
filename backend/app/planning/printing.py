@@ -28,19 +28,26 @@ def print_requirements(data, calc_date, horizon):
     specs["group"] = specs.component.map(material_group)
     printed = specs.component_kind.fillna("").isin(["", "Печатные материалы для производства"])
     specs = specs[printed & specs.group.notna() & (specs.qty_per_1000 > 0)]
-    usage = items.merge(specs, on="spec").merge(sales, left_on="name", right_index=True, how="left")
-    usage["key"] = usage.component.map(analog_key)
+    norms = items.merge(specs, on="spec")
+    norms["key"] = norms.component.map(analog_key)
+    norms = norms.groupby(["key", "name", "component", "group"], as_index=False).qty_per_1000.sum()
+    usage = norms.merge(plan, left_on="name", right_on="item", how="left")
     usage["demand"] = usage.qty.fillna(0) * usage.qty_per_1000 / 1000
     stock = data.stock[data.stock.role == MATERIALS]
     balances = stock.groupby(stock.name.map(analog_key)).available.sum()
     rows = []
     for key, parts in usage.groupby("key"):
+        breakdown = parts.groupby(["name", "qty_per_1000"], as_index=False).agg(
+            sales=("qty", "sum"), demand=("demand", "sum")
+        )
         rows.append(
             dict(
                 key=key,
                 name=parts.component.iloc[0],
                 group=parts.group.iloc[0],
                 demand=round(float(parts.demand.sum()), 6),
+                products=breakdown[breakdown.sales > 0].to_dict("records"),
+                monthly=parts.groupby("month").demand.sum().reindex(months, fill_value=0).round(6).tolist(),
                 stock=float(balances.get(key, 0)),
             )
         )
