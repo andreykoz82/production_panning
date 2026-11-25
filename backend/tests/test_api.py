@@ -278,3 +278,13 @@ def test_import_skips_excel_lock_file(client, data_dir, tmp_path, monkeypatch):
     (tmp_path / "Остатки по складам.xlsx").write_bytes(b"not an excel file")
     r = client.post("/api/imports/from-folder")
     assert r.status_code == 422 and "Остатки по складам.xlsx" in r.json()["detail"]
+
+
+def test_print_order_year_boundary(client, data_dir):
+    client.post("/api/imports/from-folder").raise_for_status()
+    order = client.get("/api/planning/print-order?calc_date=2026-11-25&months=3").json()
+    assert order["target"] == "2027-01-01"
+    assert order["months"] == ["2026-12-01", "2027-01-01", "2027-02-01"]
+    assert not order["missing_months"]
+    assert {r["group"] for r in order["rows"]} == {"Пачки", "Конверты", "Ярлыки", "Вкладыши"}
+    assert any(r["demand"] > r["stock"] for r in order["rows"])

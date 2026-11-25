@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from app import models
 from app.db import get_session
 from app.exporters.stage2_xlsx import build_stage2_workbook
-from app.services.planning import run_stage2
+from app.planning.printing import print_requirements
+from app.services.planning import load_planning_data, run_stage2
 
 router = APIRouter(prefix="/api/planning", tags=["Планирование"])
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -75,3 +76,16 @@ def export_run(run_id: int, session: SessionDep):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
     )
+
+
+@router.get("/print-order")
+def print_order(session: SessionDep, calc_date: date, months: int = Query(3, ge=3, le=24)):
+    snapshot = session.scalar(
+        select(models.ImportSnapshot).order_by(models.ImportSnapshot.id.desc()).limit(1)
+    )
+    if snapshot is None:
+        raise HTTPException(404, "Сначала загрузите выгрузки 1С")
+    return {
+        "snapshot": snapshot.id,
+        **print_requirements(load_planning_data(session, snapshot.id), calc_date, months),
+    }
