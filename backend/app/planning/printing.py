@@ -31,13 +31,22 @@ def print_requirements(data, calc_date, horizon):
     norms = items.merge(specs, on="spec")
     norms["key"] = norms.component.map(analog_key)
     norms = norms.groupby(["key", "name", "component", "group"], as_index=False).qty_per_1000.sum()
-    usage = norms.merge(plan, left_on="name", right_on="item", how="left")
+    future_plan = data.plan[data.plan.month >= months[0]]
+    planned_months = set(future_plan.month)
+    calendar = []
+    period = months[0]
+    while planned_months and period <= max(planned_months):
+        calendar.append(period)
+        period = add_months(period, 1)
+    usage = norms.merge(future_plan, left_on="name", right_on="item", how="left")
     usage["demand"] = usage.qty.fillna(0) * usage.qty_per_1000 / 1000
     stock = data.stock[data.stock.role == MATERIALS]
     balances = stock.groupby(stock.name.map(analog_key)).available.sum()
     rows = []
     for key, parts in usage.groupby("key"):
-        breakdown = parts.groupby(["name", "qty_per_1000"], as_index=False).agg(
+        horizon_parts = parts[parts.month.isin(months)]
+        monthly = parts.groupby("month").demand.sum()
+        breakdown = horizon_parts.groupby(["name", "qty_per_1000"], as_index=False).agg(
             sales=("qty", "sum"), demand=("demand", "sum")
         )
         rows.append(
@@ -45,14 +54,16 @@ def print_requirements(data, calc_date, horizon):
                 key=key,
                 name=parts.component.iloc[0],
                 group=parts.group.iloc[0],
-                demand=round(float(parts.demand.sum()), 6),
+                demand=round(float(horizon_parts.demand.sum()), 6),
                 products=breakdown[breakdown.sales > 0].to_dict("records"),
-                monthly=parts.groupby("month").demand.sum().reindex(months, fill_value=0).round(6).tolist(),
+                future=[float(monthly.get(m, 0)) if m in planned_months else None for m in calendar],
+                monthly=monthly.reindex(months, fill_value=0).round(6).tolist(),
                 stock=float(balances.get(key, 0)),
             )
         )
     return dict(
         months=months,
+        calendar=calendar,
         target=add_months(start, 2),
         rows=rows,
         missing_specs=missing_specs,

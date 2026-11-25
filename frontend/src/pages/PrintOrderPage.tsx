@@ -1,14 +1,29 @@
 import { Alert, Button, Group, Loader, NumberInput, Paper, Stack, Table, Text, TextInput, Title } from '@mantine/core'
 import { Fragment, useEffect, useState } from 'react'
 
-type Row = { key: string; name: string; group: string; stock: number; demand: number; monthly: number[]; products: { name: string; sales: number; qty_per_1000: number; demand: number }[] }
-type Calculation = { months: string[]; target: string; rows: Row[]; snapshot: number; missing_months: string[]; missing_specs: string[] }
+type Row = { key: string; name: string; group: string; stock: number; demand: number; monthly: number[]; future: (number | null)[]; products: { name: string; sales: number; qty_per_1000: number; demand: number }[] }
+type Calculation = { calendar: string[]; months: string[]; target: string; rows: Row[]; snapshot: number; missing_months: string[]; missing_specs: string[] }
 const groups = ['Пачки', 'Конверты', 'Ярлыки', 'Вкладыши']
 const month = (date: string) => new Date(date + 'T12:00:00').toLocaleDateString('ru', { month: 'long', year: 'numeric' })
 const format = (n: number) => n.toLocaleString('ru')
 
 const units = (value: number) => format(Math.round(value) || 0)
 const lotSize = 10_000
+
+function daysOfStock(balance: number, next: number, calendar: string[], demand: (number | null)[]) {
+  if (balance <= 0) return 0
+  let days = 0
+  for (let i = next; i < calendar.length; i++) {
+    const volume = demand[i]
+    if (volume === null) break
+    const start = new Date(calendar[i] + 'T12:00:00')
+    const length = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()
+    if (volume > 0 && balance <= volume) return days + Math.floor(balance * length / volume)
+    days += length
+    balance -= volume
+  }
+  return days ? `≥ ${days}` : 'Нет плана'
+}
 
 function forecast(row: Row, data: Calculation, receipt: number, order: number) {
   let balance = row.stock
@@ -17,9 +32,7 @@ function forecast(row: Row, data: Calculation, receipt: number, order: number) {
     const incoming = (i === 0 ? receipt : 0) + (date === data.target ? order : 0)
     const demand = row.monthly[i]
     balance += incoming - demand
-    const start = new Date(date + 'T12:00:00')
-    const days = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()
-    const coverage = demand > 0 ? Math.floor(Math.max(0, balance) * days / demand) : '—'
+    const coverage = daysOfStock(balance, i + 1, data.calendar, row.future)
     return { date, opening, incoming, demand, balance, coverage }
   })
 }
@@ -55,7 +68,7 @@ function Order({ data }: { data: Calculation }) {
     {data.missing_months.length > 0 && <Alert color="red">В плане продаж отсутствуют месяцы: {data.missing_months.map(month).join(', ')}. Загрузите полный план.</Alert>}
     {data.missing_specs.length > 0 && <Alert color="orange">В расход не вошли изделия без спецификации: {data.missing_specs.join(', ')}</Alert>}
     <Text size="sm">В поступление внесите только ещё не оприходованную часть предыдущего заказа. Ввод сохраняется в этом браузере по месяцу поступления.</Text>
-    <Text size="sm">Расход рассчитан по плану продаж и нормам материалов на 1 000 изделий. Дефицит округляется вверх до партии 10 000 шт. Дни запаса рассчитаны по среднесуточному расходу соответствующего месяца. При нулевом расходе показано «—».</Text>
+    <Text size="sm">Расход рассчитан по плану продаж и нормам материалов на 1 000 изделий. Дефицит округляется вверх до партии 10 000 шт. Дни запаса считаются со следующего месяца по будущему плану продаж. Внутри месяца расход распределён равномерно. Знак «≥» означает, что запас покрывает весь доступный непрерывный план.</Text>
     <Button w="fit-content" disabled={!!data.missing_months.length || !data.rows.some(r => quantity(r) > 0)} onClick={exportOrder}>Скачать заказ (CSV)</Button>
     {data.rows.length === 0 && <Text>В спецификациях не найдены печатные материалы выбранных типов.</Text>}
     {groups.map(group => {
