@@ -149,6 +149,20 @@ def test_nfp_must_match_fraction_purpose_and_packing_flag():
     assert nfp["need_kg"] == 500 and nfp["shortage_kg"] == 200  # 500 − 100 доступно − 200 карантин
 
 
+def test_all_resources_short_of_full_need_are_reported():
+    item = "Пижма цветки 75г"
+    box = "Б-6М Пижма цветки 75г"
+    data = _data(
+        items=[{"name": item, "nfp": "Пижма НФП", "spec": item}],
+        specs=_spec(item, nfp="Пижма НФП", nfp_kg=75, box=box) + [(item, "Этикетка", None, 1000)],
+        plan=[(item, date(2026, 12, 1), 10_000)],
+        stock=[_box(500, box), _box(10_000, "Этикетка")],
+    )
+    row = calculate_stage2(data, Stage2Params(2, CALC)).lines.iloc[0]
+    assert row["limit"].splitlines() == ["НФП", box]
+    assert row["feasible"] == 0
+
+
 def test_shared_nfp_goes_to_earlier_stockout_first():
     data = _data(
         items=[
