@@ -43,7 +43,7 @@ function Order({ data }: { data: Calculation }) {
       const rows = data.rows.filter(r => r.group === group)
       return rows.length > 0 && <Paper key={group} p="md" withBorder>
         <Title order={4}>{group}</Title>
-        <Table.ScrollContainer minWidth={750}><Table striped>
+        <Table.ScrollContainer minWidth={750}><Table striped stickyHeaderOffset={0}>
           <Table.Thead><Table.Tr><Table.Th>Материал</Table.Th><Table.Th>Доступный остаток</Table.Th>
             <Table.Th>Поступление · {month(data.months[0])}</Table.Th><Table.Th>Расход по плану</Table.Th><Table.Th>К заказу</Table.Th>
           </Table.Tr></Table.Thead>
